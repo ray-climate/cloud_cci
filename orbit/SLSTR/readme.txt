@@ -1,1 +1,3 @@
-python3 SLSTR/compute_central_values.py --manifest /Users/rs/Projects/cloud_cci/orbit/SLSTR/sample_data/S3A_SL_1_RBT____20240801T235820_20240802T000120_20240803T091114_0179_115_187_3420_PS1_O_NT_004.manifest --polygon-dir SLSTR/polygon_output
+python3 SLSTR/compute_central_values.py --batch-root SLSTR/neodc/sentinel3a/data/SLSTR/
+  L1_RBT --start-date 2024-08-01 --end-date 2025-08-01 --output polygon_slstr3a/results.csv --polygon-dir
+  polygon_slstr3a

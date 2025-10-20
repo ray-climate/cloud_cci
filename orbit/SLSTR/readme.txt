@@ -1,0 +1,1 @@
+python3 SLSTR/compute_central_values.py --manifest /Users/rs/Projects/cloud_cci/orbit/SLSTR/sample_data/S3A_SL_1_RBT____20240801T235820_20240802T000120_20240803T091114_0179_115_187_3420_PS1_O_NT_004.manifest --polygon-dir SLSTR/polygon_output

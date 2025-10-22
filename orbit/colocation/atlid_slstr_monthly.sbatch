@@ -4,11 +4,10 @@
 #SBATCH --job-name=atlid-slstr-month
 #SBATCH --array=1-12
 #SBATCH --time=04:00:00
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=8G
+#SBATCH --mem=16000
 #SBATCH --output=slurm-%x-%A_%a.out
 #SBATCH --error=slurm-%x-%A_%a.err
-#SBATCH --qos=standard
+#SBATCH --qos=short
 
 set -euo pipefail
 

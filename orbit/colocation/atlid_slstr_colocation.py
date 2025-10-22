@@ -257,7 +257,7 @@ def write_matches(output_path: Path, matches: Sequence[Dict[str, object]]) -> No
 def main() -> None:
     script_dir = Path(__file__).resolve().parent
     repo_root = script_dir.parent
-    atlid_path = repo_root / "ATLID" / "atlid_positions.csv"
+    atlid_path = repo_root / "ATLID" / "atlid_sampled_positions.csv"
     slstr_folders = [
         repo_root / "SLSTR" / "polygon_slstr3a", # remove 3b
     ]

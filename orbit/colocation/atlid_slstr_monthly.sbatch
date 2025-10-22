@@ -12,10 +12,25 @@
 
 set -euo pipefail
 
-YEAR="${TARGET_YEAR:-2024}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-MONTH=$(printf "%02d" "${SLURM_ARRAY_TASK_ID:-1}")
-MONTH_KEY="${YEAR}-${MONTH}"
+START_YEAR="${START_YEAR:-${TARGET_YEAR:-2024}}"
+START_MONTH="${START_MONTH:-08}"
+
+MONTH_KEY=$("${PYTHON_BIN}" - <<'PY' "${START_YEAR}" "${START_MONTH}" "${SLURM_ARRAY_TASK_ID:-1}"
+import sys
+
+start_year = int(sys.argv[1])
+start_month = int(sys.argv[2])
+array_idx = int(sys.argv[3])
+
+offset = array_idx - 1
+month = start_month + offset
+year = start_year + (month - 1) // 12
+month = ((month - 1) % 12) + 1
+
+print(f"{year:04d}-{month:02d}")
+PY
+)
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)

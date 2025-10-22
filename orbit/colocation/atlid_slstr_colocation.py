@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Dict, Iterable, Iterator, List, Sequence
 
 TIME_WINDOW = timedelta(hours=4)
+PROGRESS_INTERVAL = 500
 EPSILON = 1e-9
 
 
@@ -157,8 +158,17 @@ def parse_atlid_timestamp(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
 
 
-def find_matches(atlid_rows: Iterable[Dict[str, str]], candidates: Sequence[Candidate], timeline: Sequence[datetime]) -> List[Dict[str, object]]:
+def find_matches(
+    atlid_rows: Iterable[Dict[str, str]],
+    candidates: Sequence[Candidate],
+    timeline: Sequence[datetime],
+) -> List[Dict[str, object]]:
     matches: List[Dict[str, object]] = []
+    try:
+        total_rows = len(atlid_rows)  # type: ignore[arg-type]
+    except TypeError:
+        total_rows = None
+    processed = 0
     for row in atlid_rows:
         try:
             lat = float(row["latitude"])
@@ -195,6 +205,29 @@ def find_matches(atlid_rows: Iterable[Dict[str, str]], candidates: Sequence[Cand
                         "time_diff_seconds": time_diff.total_seconds(),
                     }
                 )
+        processed += 1
+        if processed % PROGRESS_INTERVAL == 0:
+            if total_rows is not None:
+                print(
+                    f"Processed {processed}/{total_rows} ATLID rows | matches so far: {len(matches)}",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"Processed {processed} ATLID rows | matches so far: {len(matches)}",
+                    flush=True,
+                )
+    if processed:
+        if total_rows is not None:
+            print(
+                f"Processed {processed}/{total_rows} ATLID rows | matches so far: {len(matches)}",
+                flush=True,
+            )
+        else:
+            print(
+                f"Processed {processed} ATLID rows | matches so far: {len(matches)}",
+                flush=True,
+            )
     return matches
 
 
@@ -233,6 +266,10 @@ def main() -> None:
 
     candidates, timeline = build_candidates(slstr_folders)
     atlid_rows = load_atlid_rows(atlid_path)
+    print(
+        f"Scanning {len(atlid_rows)} ATLID rows against {len(candidates)} SLSTR polygons",
+        flush=True,
+    )
     matches = find_matches(atlid_rows, candidates, timeline)
     write_matches(output_path, matches)
     print(f"Wrote {len(matches)} matches to {output_path}")

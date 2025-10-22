@@ -259,7 +259,7 @@ def main() -> None:
     repo_root = script_dir.parent
     atlid_path = repo_root / "ATLID" / "atlid_positions.csv"
     slstr_folders = [
-        repo_root / "SLSTR" / "polygon_slstr3a",
+        repo_root / "SLSTR" / "polygon_slstr3a", # remove 3b
     ]
     output_path = script_dir / "atlid_slstr_matches.csv"
 

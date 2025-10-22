@@ -36,5 +36,5 @@ REPO_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
 cd "${REPO_ROOT}"
 
 echo "[$(date --iso-8601=seconds)] Starting ATLID/SLSTR colocation for ${MONTH_KEY}"
-${PYTHON_BIN} colocation/atlid_slstr_colocation.py --month "${MONTH_KEY}" --output "colocation/atlid_slstr_matches_${MONTH_KEY}.csv"
+${PYTHON_BIN} ./atlid_slstr_colocation.py --month "${MONTH_KEY}" --output "./atlid_slstr_matches_${MONTH_KEY}.csv"
 echo "[$(date --iso-8601=seconds)] Finished ATLID/SLSTR colocation for ${MONTH_KEY}"

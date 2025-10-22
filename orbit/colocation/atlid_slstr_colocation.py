@@ -2,6 +2,7 @@
 """Find ATLID observations that fall inside SLSTR polygons within a time window."""
 from __future__ import annotations
 
+import argparse
 import csv
 import json
 import sys
@@ -10,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from bisect import bisect_left, bisect_right
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, List, Sequence
+from typing import Dict, Iterable, Iterator, List, Sequence, Tuple
 
 TIME_WINDOW = timedelta(hours=4)
 PROGRESS_INTERVAL = 500
@@ -237,6 +238,38 @@ def load_atlid_rows(atlid_path: Path) -> List[Dict[str, str]]:
         return list(reader)
 
 
+def parse_month_range(value: str) -> Tuple[datetime, datetime]:
+    try:
+        month_start_naive = datetime.strptime(value, "%Y-%m")
+    except ValueError as error:
+        raise ValueError(
+            "Month must be provided in YYYY-MM format (example: 2024-08)"
+        ) from error
+    month_start = month_start_naive.replace(tzinfo=timezone.utc)
+    year = month_start.year
+    month = month_start.month
+    if month == 12:
+        next_month = datetime(year=year + 1, month=1, day=1, tzinfo=timezone.utc)
+    else:
+        next_month = datetime(year=year, month=month + 1, day=1, tzinfo=timezone.utc)
+    return month_start, next_month
+
+
+def filter_atlid_rows_by_month(
+    rows: Sequence[Dict[str, str]], month_str: str
+) -> Tuple[List[Dict[str, str]], Tuple[datetime, datetime]]:
+    month_start, month_end = parse_month_range(month_str)
+    filtered: List[Dict[str, str]] = []
+    for row in rows:
+        timestamp_str = row.get("timestamp")
+        if not timestamp_str:
+            raise ValueError(f"Missing timestamp in row: {row}")
+        atlid_dt = parse_atlid_timestamp(timestamp_str)
+        if month_start <= atlid_dt < month_end:
+            filtered.append(row)
+    return filtered, (month_start, month_end)
+
+
 def write_matches(output_path: Path, matches: Sequence[Dict[str, object]]) -> None:
     fieldnames = [
         "latitude",
@@ -254,17 +287,79 @@ def write_matches(output_path: Path, matches: Sequence[Dict[str, object]]) -> No
             writer.writerow(row)
 
 
+def build_argument_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Colocate ATLID sampled positions with SLSTR polygons",
+    )
+    parser.add_argument(
+        "--month",
+        "-m",
+        help="Target month in YYYY-MM format; limits processing to that month",
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        help=(
+            "Optional custom output CSV path; defaults to a month-specific file when"
+            " --month is set, otherwise atlid_slstr_matches.csv"
+        ),
+    )
+    return parser
+
+
 def main() -> None:
+    parser = build_argument_parser()
+    args = parser.parse_args()
+
     script_dir = Path(__file__).resolve().parent
     repo_root = script_dir.parent
     atlid_path = repo_root / "ATLID" / "atlid_sampled_positions.csv"
     slstr_folders = [
         repo_root / "SLSTR" / "polygon_slstr3a", # remove 3b
     ]
-    output_path = script_dir / "atlid_slstr_matches.csv"
+
+    atlid_rows = load_atlid_rows(atlid_path)
+    month_range: Tuple[datetime, datetime] | None = None
+
+    if args.month:
+        filtered_rows, month_range = filter_atlid_rows_by_month(atlid_rows, args.month)
+        print(
+            f"Filtering ATLID rows to month {args.month}: {len(filtered_rows)} remaining",
+            flush=True,
+        )
+        atlid_rows = filtered_rows
+        if not atlid_rows:
+            print(
+                f"No ATLID rows found for month {args.month}; nothing to process.",
+                flush=True,
+            )
+    if not atlid_rows:
+        return
 
     candidates, timeline = build_candidates(slstr_folders)
-    atlid_rows = load_atlid_rows(atlid_path)
+    if month_range:
+        start_bound = month_range[0] - TIME_WINDOW
+        end_bound = month_range[1] + TIME_WINDOW
+        filtered_candidates = [
+            candidate
+            for candidate in candidates
+            if start_bound <= candidate.dt < end_bound
+        ]
+        print(
+            "Filtering SLSTR candidates to month window"
+            f" {args.month}: {len(filtered_candidates)} remaining",
+            flush=True,
+        )
+        candidates = filtered_candidates
+        timeline = [candidate.dt for candidate in candidates]
+
+    if args.output:
+        output_path = Path(args.output)
+    elif args.month:
+        output_path = script_dir / f"atlid_slstr_matches_{args.month}.csv"
+    else:
+        output_path = script_dir / "atlid_slstr_matches.csv"
+
     print(
         f"Scanning {len(atlid_rows)} ATLID rows against {len(candidates)} SLSTR polygons",
         flush=True,

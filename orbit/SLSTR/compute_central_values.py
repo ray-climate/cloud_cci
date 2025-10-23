@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import sys
@@ -54,7 +55,209 @@ def compute_central_coordinates(polygons: list[list[tuple[float, float]]]) -> tu
         raise ValueError("Polygon coordinate list is empty")
     lats = [lat for lat, _ in flat]
     lons = [lon for _, lon in flat]
-    return sum(lats) / len(lats), sum(lons) / len(lons)
+    return sum(lats) / len(lats), circular_mean(lons)
+
+
+def circular_mean(values: list[float]) -> float:
+    if not values:
+        raise ValueError("Longitude list is empty")
+    radians = [math.radians(value) for value in values]
+    sin_sum = sum(math.sin(value) for value in radians)
+    cos_sum = sum(math.cos(value) for value in radians)
+    angle = math.degrees(math.atan2(sin_sum, cos_sum))
+    if angle > 180:
+        return angle - 360
+    if angle <= -180:
+        return angle + 360
+    return angle
+
+
+def remove_adjacent_duplicates(coords: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    cleaned: list[tuple[float, float]] = []
+    for coord in coords:
+        if not cleaned or coord != cleaned[-1]:
+            cleaned.append(coord)
+    return cleaned
+
+
+def drop_duplicate_endpoint(coords: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    if len(coords) > 1 and coords[0] == coords[-1]:
+        return coords[:-1]
+    return coords
+
+
+def wrap_to_180(value: float) -> float:
+    wrapped = ((value + 180.0) % 360.0) - 180.0
+    if wrapped == -180.0 and value > 0:
+        return 180.0
+    if wrapped == 180.0 and value < 0:
+        return -180.0
+    if abs(wrapped) < 1e-12:
+        return 0.0
+    return wrapped
+
+
+def unwrap_longitudes(coords: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    if not coords:
+        return []
+    unwrapped: list[tuple[float, float]] = [coords[0]]
+    offset = 0.0
+    prev_lon = coords[0][1]
+    for lat, lon in coords[1:]:
+        adjusted = lon + offset
+        delta = adjusted - prev_lon
+        if delta > 180:
+            offset -= 360
+            adjusted = lon + offset
+        elif delta < -180:
+            offset += 360
+            adjusted = lon + offset
+        unwrapped.append((lat, adjusted))
+        prev_lon = adjusted
+    return unwrapped
+
+
+def boundaries_between(lon1: float, lon2: float) -> list[float]:
+    boundaries: list[float] = []
+    epsilon = 1e-9
+    if lon2 > lon1 + epsilon:
+        boundary = math.ceil((lon1 + epsilon) / 180.0) * 180.0
+        while boundary < lon2 - epsilon:
+            boundaries.append(boundary)
+            boundary += 180.0
+    elif lon2 < lon1 - epsilon:
+        boundary = math.floor((lon1 - epsilon) / 180.0) * 180.0
+        while boundary > lon2 + epsilon:
+            boundaries.append(boundary)
+            boundary -= 180.0
+    return boundaries
+
+
+def split_ring_across_meridians(coords: list[tuple[float, float]]) -> list[list[tuple[float, float]]]:
+    core = remove_adjacent_duplicates(drop_duplicate_endpoint(coords))
+    if len(core) < 3:
+        return []
+    unwrapped = unwrap_longitudes(core)
+    first_lat, first_lon = unwrapped[0]
+    last_lon = unwrapped[-1][1]
+    closure_lon = first_lon
+    while closure_lon - last_lon > 180:
+        closure_lon -= 360
+    while closure_lon - last_lon < -180:
+        closure_lon += 360
+    cycle = unwrapped + [(first_lat, closure_lon)]
+    segments: list[list[tuple[float, float]]] = []
+    current: list[tuple[float, float]] = [cycle[0]]
+    for index in range(1, len(cycle)):
+        prev = cycle[index - 1]
+        curr = cycle[index]
+        prev_point = prev
+        for boundary in boundaries_between(prev_point[1], curr[1]):
+            denom = curr[1] - prev_point[1]
+            if abs(denom) < 1e-9:
+                continue
+            fraction = (boundary - prev_point[1]) / denom
+            boundary_lat = prev_point[0] + fraction * (curr[0] - prev_point[0])
+            intersection = (boundary_lat, boundary)
+            if not current or current[-1] != intersection:
+                current.append(intersection)
+            if len(current) >= 2:
+                segments.append(current)
+            if boundary % 180 == 0 and boundary != 0:
+                shifted = boundary - 360 if boundary > 0 else boundary + 360
+                current = [(boundary_lat, shifted)]
+            else:
+                current = [intersection]
+            prev_point = intersection
+        if index < len(cycle) - 1:
+            current.append(curr)
+    if len(current) >= 2:
+        segments.append(current)
+    return segments
+
+
+def classify_zone(coords: list[tuple[float, float]]) -> int:
+    epsilon = 1e-9
+    positive = any((lon > epsilon) and (abs(lon) < 180 - epsilon) for _, lon in coords)
+    negative = any((lon < -epsilon) and (abs(lon) < 180 - epsilon) for _, lon in coords)
+    if positive and not negative:
+        return 1
+    if negative and not positive:
+        return -1
+    return 0
+
+
+def align_boundary_signs(coords: list[tuple[float, float]], zone: int) -> list[tuple[float, float]]:
+    aligned: list[tuple[float, float]] = []
+    for lat, lon in coords:
+        if abs(abs(lon) - 180.0) < 1e-9:
+            if zone < 0:
+                lon = -180.0
+            elif zone > 0:
+                lon = 180.0
+        aligned.append((lat, lon))
+    return aligned
+
+
+def normalise_polygons(polygons: list[list[tuple[float, float]]]) -> list[list[tuple[float, float]]]:
+    normalised: list[list[tuple[float, float]]] = []
+    for polygon in polygons:
+        segments = split_ring_across_meridians(polygon)
+        if not segments:
+            cleaned = remove_adjacent_duplicates(drop_duplicate_endpoint(polygon))
+            if len(cleaned) >= 3:
+                normalised.append(ensure_closed_ring(cleaned))
+            continue
+
+        processed: list[tuple[int, list[tuple[float, float]]]] = []
+        for segment in segments:
+            rewrapped = [(lat, wrap_to_180(lon)) for lat, lon in segment]
+            cleaned = remove_adjacent_duplicates(rewrapped)
+            if len(cleaned) < 2:
+                continue
+            zone = classify_zone(cleaned)
+            processed.append((zone, cleaned))
+
+        if not processed:
+            continue
+
+        grouped: list[tuple[int, list[tuple[float, float]]]] = []
+        for zone, coords in processed:
+            if not grouped:
+                grouped.append((zone, coords[:]))
+                continue
+            prev_zone, prev_coords = grouped[-1]
+            if zone == prev_zone or zone == 0 or prev_zone == 0:
+                combined_zone = zone if prev_zone == 0 else prev_zone if zone == 0 else prev_zone
+                merged = prev_coords + coords[1:]
+                grouped[-1] = (combined_zone, remove_adjacent_duplicates(merged))
+            else:
+                grouped.append((zone, coords[:]))
+
+        if len(grouped) > 1:
+            first_zone, first_coords = grouped[0]
+            last_zone, last_coords = grouped[-1]
+            if first_zone == last_zone or first_zone == 0 or last_zone == 0:
+                combined_zone = first_zone if first_zone != 0 else last_zone
+                merged = last_coords + first_coords[1:]
+                grouped[0] = (combined_zone, remove_adjacent_duplicates(merged))
+                grouped.pop()
+
+        for zone, coords in grouped:
+            cleaned = remove_adjacent_duplicates(coords)
+            if len(cleaned) < 3:
+                continue
+            aligned = align_boundary_signs(cleaned, zone)
+            normalised.append(ensure_closed_ring(aligned))
+
+    if normalised:
+        return normalised
+    fallback: list[list[tuple[float, float]]] = []
+    for polygon in polygons:
+        cleaned = remove_adjacent_duplicates(drop_duplicate_endpoint(polygon))
+        if len(cleaned) >= 3:
+            fallback.append(ensure_closed_ring(cleaned))
+    return fallback
 
 
 def ensure_closed_ring(coords: list[tuple[float, float]]) -> list[tuple[float, float]]:
@@ -148,7 +351,7 @@ def parse_manifest(path: Path) -> tuple[str, float, float, list[list[tuple[float
     polygons = collect_polygons(root)
     central_time = compute_central_time(start_iso, stop_iso).isoformat().replace("+00:00", "Z")
     central_lat, central_lon = compute_central_coordinates(polygons)
-    return central_time, central_lat, central_lon, polygons
+    return central_time, central_lat, central_lon, normalise_polygons(polygons)
 
 
 def date_from_string(value: str) -> date:

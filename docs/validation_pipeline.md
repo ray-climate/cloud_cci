@@ -67,12 +67,12 @@ flowchart TB
     end
 
     TM["<b>Time match</b><br/>nearest SEVIRI slot<br/>|Δt| ≤ 7.5 min"]:::proc
-    SM["<b>Space match</b><br/>nearest pixel (haversine)<br/>≤ 5 km at nadir"]:::proc
+    SM["<b>Space match</b><br/>on-disk filter +<br/>nearest pixel (haversine)<br/>distance recorded"]:::proc
     NJ["<b>Nadir join</b><br/>by along_track index<br/>(synergy on ATLID grid)"]:::proc
 
     REF["<b>Reference mapper</b><br/>extract ORAC-equivalent<br/>per ATLID profile"]:::proc
 
-    DB[("<b>matches CSV</b><br/>1 row per ATLID profile<br/>+ sev_pixel_id, n_atlid")]:::store
+    DB[("<b>matches CSV</b><br/>1 row per ATLID profile<br/>+ sev_pixel_id · n_atlid ·<br/>distance_km · time_diff_s")]:::store
 
     AGG["<b>Aggregate</b> by sev_pixel_id<br/>per-variable rule<br/>(see §4)"]:::proc
     STR["<b>Stratify</b><br/>τ · phase · lat band ·<br/>day-night · land cover"]:::proc
@@ -97,6 +97,16 @@ flowchart TB
     ST --> NC
     ST --> FIG
 ```
+
+### Space match — design note
+
+SEVIRI is a continuous geostationary grid: every on-disk ATLID sample has a well-defined nearest pixel by construction. Rather than imposing a hard distance cap (which would have to scale with view zenith angle to be physically sensible — pixels grow from ~3 km at the sub-satellite point to ~30 km at the limb), we:
+
+1. **Pre-filter** ATLID samples to where SEVIRI's `lat`/`lon` is finite (the disk).
+2. **Match** survivors to their nearest pixel (haversine, no distance cap).
+3. **Record** `distance_km` and `time_diff_s` per match as columns.
+
+Distance is then available downstream as a QC stratification (e.g. high-VZA limb pixels naturally have larger nearest-centre distances) without forcing a hard cut at match time.
 
 ---
 
@@ -143,6 +153,7 @@ flowchart TB
     S --> L["<b>Latitude band</b><br/>tropics · mid-lat · polar"]:::dim
     S --> D["<b>Day / night</b>"]:::dim
     S --> C["<b>Land cover</b><br/>Phase 1: ocean · land<br/>Phase 2: + snow / sea-ice"]:::dim
+    S --> Q["<b>Match quality</b> (optional QC)<br/>distance_km · time_diff_s ·<br/>n_atlid per pixel"]:::dim
 ```
 
 ---

@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# Editor swap files
+.*.swp
+.*.swo
+.*.swm
+.*.swn
+
+# SLURM output
+slurm-*.out
+slurm-*.err
+.slurm-*.out
+.slurm-*.err
+.slurm-*.swp
+
+# Validation outputs (reproducible from scripts + downloaded data)
+validation_data/
+
+# EarthCARE downloaded products (large, fetchable via earthcare CLI)
+earthcare_data/

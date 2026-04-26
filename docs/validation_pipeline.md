@@ -160,52 +160,46 @@ flowchart TB
 
 ## 6. Module layout
 
+The `validation/` package is implemented for the **cot** variable end-to-end. Other variables (cth, cer, cwp, phase, cldmask, cldtype) plug in by adding a per-product reader and an extractor — the collocation, aggregation, stratification and figure code are variable-agnostic.
+
 ```
 validation/
   __init__.py
-  __main__.py
-  cli.py                 # collocate · evaluate · figures · report
-  collocate.py           # spatial + temporal matching, nadir join
-  readers.py             # per-product variable lookup
-  reference.py           # ORAC-equivalent extraction per profile
-  statistics.py          # groupby aggregation + stratified stats
-  figures.py             # scatter · diff map · histogram · confusion
-  io.py                  # CSV / NetCDF
-  configs/defaults.yaml  # per-variable plot + QC defaults
-
-scripts/
-  run_validation_month.py
-  run_validation_month.sbatch
-
-tests/validation/
-  test_collocate.py
-  test_statistics.py
-  test_reference.py
+  __main__.py            # python -m validation
+  cli.py                 # collocate · evaluate · figures
+  collocate.py           # bulk cKDTree match, time + space + nadir join
+  readers.py             # A-EBD reader (extend per product)
+  reference.py           # cot_from_aebd: ∫α dz with QC + attenuation flag
+  statistics.py          # aggregate_to_pixel + stratified_stats + cot_report
+  figures.py             # scatter_panel · diagnostic_panel · bias_by_stratum
 ```
+
+**Attenuation flag.** A profile is "attenuated" (reported τ is a lower bound) when ≥50% of bins below 5 km altitude are QS=3 *and* the integrated τ ≥ 1.0. Replaces an earlier "any QS=3 anywhere in column" rule that fired on isolated noise bins and over-flagged 99% of profiles. The current rule fires on ~33% of profiles in mid-Atlantic test frames, with median τ=3.3 — consistent with lidar saturation around the published τ~3-5 threshold for ATLID at 355 nm.
+
+**ORAC saturation tracking.** ORAC cot retrievals at the upper LUT rail (≥100) are unconverged. They're flagged as a separate stratum (`cot_orac_saturated`), not silently dropped. ~4% of cot matches are saturated in the mid-Atlantic test scene.
 
 ---
 
 ## 7. CLI
 
 ```bash
-# Collocate one month, driving on A-CTH for cth/cldmask/cldtype work
+# Match every A-EBD frame in 2026-02 to the nearest SEVIRI ORAC slot.
+# Per-frame CSVs in --out (resumable: existing CSVs are skipped).
 python -m validation collocate \
-    --driver A-CTH \
-    --secondary ACM-CAP,AC-TC \
-    --start 2026-02-01 --end 2026-02-28 \
-    --orac-root /gws/ssde/j25a/cloud_ecv/data_out/seviri --retrieval R11 \
-    --out validation_data/matches_A-CTH_2026-02.csv
+    --driver A-EBD --start 2026-02-01 --end 2026-03-01 \
+    --seviri-root /gws/ssde/j25a/cloud_ecv/data_out/seviri --retrieval R11 \
+    --out validation_data/cot_2026-02
 
-# For cot, drive on A-EBD so τ is on the same along-track grid
-python -m validation collocate --driver A-EBD --secondary ACM-CAP \
-    --start 2026-02-01 --end 2026-02-28 \
-    --out validation_data/matches_A-EBD_2026-02.csv
-
-# Aggregate, stratify, compute stats
+# Concatenate per-frame CSVs and write the stratified stats table.
 python -m validation evaluate \
-    --matches "validation_data/matches_*_2026-02.csv" \
-    --vars cot,cer,cth,cwp,phase,cldmask,cldtype \
-    --out validation_data/stats_2026-02.nc
+    --matches 'validation_data/cot_2026-02/matches_*.csv' \
+    --out validation_data/cot_2026-02/stats.csv
+
+# Five PNGs: sample/pixel scatter, 2x2 diagnostic, bias-by-stratum (sample
+# and pixel), R-by-stratum (pixel).
+python -m validation figures \
+    --matches 'validation_data/cot_2026-02/matches_*.csv' \
+    --out figures/validation/2026-02 --label "cot 2026-02"
 
 # Figures
 python -m validation figures \

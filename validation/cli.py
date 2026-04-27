@@ -27,6 +27,7 @@ from .collocate import match_track_to_seviri, open_seviri_at_matches
 from .figures import bias_by_stratum, diagnostic_panel, scatter_panel
 from .readers import read_aebd_track
 from .reference import cot_from_aebd
+from .compare_figures import bias_bar_compare, scatter_compare
 from .statistics import aggregate_to_pixel, cot_report, stratified_stats
 from .track_figures import track_panel
 
@@ -121,13 +122,13 @@ def _process_frame_cot(
 
     try:
         matches = open_seviri_at_matches(
-            matches, seviri_root, retrieval, ("cot", "cldmask", "lsflag")
+            matches, seviri_root, retrieval, ("cot", "cldmask", "lsflag", "phase")
         )
     except Exception as e:  # noqa: BLE001
         print(f"  [{fid}] ORAC sample failed ({type(e).__name__}): {e}", file=sys.stderr)
         return None, "fail"
     matches = matches.rename(columns={"cot": "cot_orac", "cldmask": "cldmask_orac",
-                                       "lsflag": "lsflag_orac"})
+                                       "lsflag": "lsflag_orac", "phase": "phase_orac"})
     matches["cot_orac_saturated"] = matches["cot_orac"] >= ORAC_COT_SATURATION
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -255,6 +256,79 @@ def cmd_figures(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# compare (R10 vs R11)
+# ---------------------------------------------------------------------------
+
+def _load_filtered(matches_glob: str, ice_only: bool) -> pd.DataFrame:
+    paths = sorted(glob(matches_glob))
+    if not paths:
+        raise FileNotFoundError(f"No matches CSVs at {matches_glob}")
+    parts = [pd.read_csv(p) for p in paths]
+    df = pd.concat(parts, ignore_index=True)
+    mask = (df["valid_match"]
+            & (df["cldmask_orac"] == 1)
+            & (df["cot_atlid"] > 0)
+            & (~df["cot_orac_saturated"])
+            & df["cot_atlid"].notna()
+            & df["cot_orac"].notna())
+    if "attenuated" in df.columns:
+        mask &= ~df["attenuated"].fillna(False).astype(bool)
+    if ice_only and "phase_orac" in df.columns:
+        mask &= df["phase_orac"] == 2
+    return df[mask].copy()
+
+
+def cmd_compare(args: argparse.Namespace) -> int:
+    base_r10 = _load_filtered(args.matches_r10, args.ice_only)
+    base_r11 = _load_filtered(args.matches_r11, args.ice_only)
+    print(f"R10 base: {len(base_r10)}  R11 base: {len(base_r11)}  "
+          f"(ice_only={args.ice_only})")
+
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    suptitle = args.label or ("ice-only cot validation" if args.ice_only else "cot validation")
+
+    scatter_compare(base_r10, base_r11,
+                    suptitle=f"{suptitle} — R10 vs R11 (sample-level)",
+                    out=out_dir / "compare_R10_R11_scatter_sample.png")
+
+    pix_r10 = aggregate_to_pixel(base_r10, "cot_atlid", "cot_orac")
+    pix_r11 = aggregate_to_pixel(base_r11, "cot_atlid", "cot_orac")
+    scatter_compare(pix_r10, pix_r11,
+                    suptitle=f"{suptitle} — R10 vs R11 (pixel-aggregate)",
+                    out=out_dir / "compare_R10_R11_scatter_pixel.png")
+
+    s10 = stratified_stats(base_r10, "cot_atlid", "cot_orac")
+    s11 = stratified_stats(base_r11, "cot_atlid", "cot_orac")
+    bias_bar_compare(s10, s11, metric="bias",
+                     title=f"{suptitle} — R10 vs R11 bias (sample)",
+                     out=out_dir / "compare_R10_R11_bias_sample.png")
+    bias_bar_compare(s10, s11, metric="r_log",
+                     title=f"{suptitle} — R10 vs R11 R_log (sample)",
+                     out=out_dir / "compare_R10_R11_r_log_sample.png")
+
+    p10 = stratified_stats(pix_r10, "cot_atlid", "cot_orac")
+    p11 = stratified_stats(pix_r11, "cot_atlid", "cot_orac")
+    bias_bar_compare(p10, p11, metric="bias",
+                     title=f"{suptitle} — R10 vs R11 bias (pixel)",
+                     out=out_dir / "compare_R10_R11_bias_pixel.png")
+    bias_bar_compare(p10, p11, metric="r_log",
+                     title=f"{suptitle} — R10 vs R11 R_log (pixel)",
+                     out=out_dir / "compare_R10_R11_r_log_pixel.png")
+
+    # Combined stats CSV.
+    out_stats = pd.concat([
+        s10.assign(view="sample", retrieval="R10"),
+        s11.assign(view="sample", retrieval="R11"),
+        p10.assign(view="pixel",  retrieval="R10"),
+        p11.assign(view="pixel",  retrieval="R11"),
+    ], ignore_index=True)
+    out_stats.to_csv(out_dir / "compare_R10_R11_stats.csv", index=False)
+    print(f"Wrote 6 PNGs and stats CSV to {out_dir}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # track-plot
 # ---------------------------------------------------------------------------
 
@@ -303,6 +377,15 @@ def build_parser() -> argparse.ArgumentParser:
     f.add_argument("--out", required=True, help="Output figure directory")
     f.add_argument("--label", default="", help="Title prefix")
     f.set_defaults(func=cmd_figures)
+
+    cmp = sub.add_parser("compare", help="R10 vs R11 ORAC retrieval comparison.")
+    cmp.add_argument("--matches-r10", required=True, help="Glob over R10 matches CSVs")
+    cmp.add_argument("--matches-r11", required=True, help="Glob over R11 matches CSVs")
+    cmp.add_argument("--out", required=True, help="Output figure directory")
+    cmp.add_argument("--label", default="", help="Title prefix")
+    cmp.add_argument("--all-phases", dest="ice_only", action="store_false",
+                     help="Skip the ice-phase filter (default: ice-only).")
+    cmp.set_defaults(func=cmd_compare, ice_only=True)
 
     t = sub.add_parser("track-plot", help="Per-orbit case-study figure for one frame.")
     t.add_argument("--frame", required=True, help="A-EBD frame ID, e.g. 09737D")

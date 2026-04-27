@@ -1,10 +1,11 @@
-"""One-shot: add `lsflag_orac` column to existing matches CSVs.
+"""One-shot: backfill ORAC variables into existing matches CSVs.
 
-The first monthly run only sampled (cot, cldmask). This script samples
-ORAC's land/sea flag at each matched (along_track, across_track) pixel
-without re-running the kd-tree collocation.
+Samples one or more ORAC variables at each matched
+``(sev_along_track, sev_across_track)`` pixel without re-running the
+kd-tree collocation. Each variable becomes a new column ``<var>_orac``
+in the matches CSV.
 
-Idempotent: skips rows that already have lsflag_orac.
+Idempotent per variable: skips columns already populated.
 """
 from __future__ import annotations
 
@@ -19,12 +20,18 @@ from orac.io import open_slot
 from orac.metadata import discover_slots
 
 
-def augment_one(csv: Path, seviri_root: Path, retrieval: str) -> str:
+def augment_one(csv: Path, seviri_root: Path, retrieval: str,
+                variables: tuple[str, ...]) -> str:
     df = pd.read_csv(csv)
-    if "lsflag_orac" in df.columns and df["lsflag_orac"].notna().any():
+    new_cols = [f"{v}_orac" for v in variables]
+    needed = [v for v, c in zip(variables, new_cols)
+              if c not in df.columns or df[c].isna().all()]
+    if not needed:
         return "skip"
 
-    df["lsflag_orac"] = np.nan
+    for v in needed:
+        df[f"{v}_orac"] = np.nan
+
     df["sev_scan_time"] = pd.to_datetime(df["sev_scan_time"], errors="coerce")
     valid = df["valid_match"].astype(bool).values
     if not valid.any():
@@ -40,14 +47,15 @@ def augment_one(csv: Path, seviri_root: Path, retrieval: str) -> str:
                                retrievals=(retrieval,))
         if not slots:
             continue
-        ds = open_slot(slots[0], retrieval, variables=("lsflag",),
+        ds = open_slot(slots[0], retrieval, variables=tuple(needed),
                        include_secondary=True)
-        if "lsflag" not in ds.variables:
-            continue
-        arr = np.asarray(ds["lsflag"].squeeze(drop=True).values)
         at = group["sev_along_track"].astype(int).values
         ac = group["sev_across_track"].astype(int).values
-        df.loc[group.index, "lsflag_orac"] = arr[at, ac]
+        for v in needed:
+            if v not in ds.variables:
+                continue
+            arr = np.asarray(ds[v].squeeze(drop=True).values)
+            df.loc[group.index, f"{v}_orac"] = arr[at, ac]
 
     df.to_csv(csv, index=False)
     return "done"
@@ -59,13 +67,17 @@ def main() -> int:
     p.add_argument("--seviri-root",
                    default="/gws/ssde/j25a/cloud_ecv/data_out/seviri")
     p.add_argument("--retrieval", default="R11", choices=("R10", "R11"))
+    p.add_argument("--variables", default="lsflag,phase",
+                   help="comma-separated ORAC variable names to sample "
+                        "(stored as <var>_orac)")
     args = p.parse_args()
+    variables = tuple(v.strip() for v in args.variables.split(",") if v.strip())
 
     csvs = sorted(Path(args.matches_dir).glob("matches_cot_*.csv"))
-    print(f"Augmenting {len(csvs)} CSVs in {args.matches_dir}")
+    print(f"Augmenting {len(csvs)} CSVs in {args.matches_dir} with {variables}")
     counts = {"done": 0, "skip": 0, "no-valid": 0}
     for i, csv in enumerate(csvs, 1):
-        status = augment_one(csv, Path(args.seviri_root), args.retrieval)
+        status = augment_one(csv, Path(args.seviri_root), args.retrieval, variables)
         counts[status] = counts.get(status, 0) + 1
         if i % 100 == 0 or i == len(csvs):
             print(f"  [{i:4d}/{len(csvs)}] {counts}")

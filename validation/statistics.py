@@ -72,24 +72,35 @@ def aggregate_to_pixel(
 # Continuous-variable stats
 # ---------------------------------------------------------------------------
 
-def continuous_stats(d: pd.DataFrame, x: str, y: str) -> dict:
-    """Bias, RMSE, MAE, R, slope, intercept, N for ``y - x``."""
+def continuous_stats(d: pd.DataFrame, x: str, y: str,
+                     log_floor: float = 0.05) -> dict:
+    """Bias, RMSE, MAE, R, R_log, slope, intercept, N for ``y - x``.
+
+    ``r_log`` is Pearson R on ``log10(clip(x, log_floor)) vs log10(clip(y, ...))``.
+    For heavy-tailed quantities like cot it's the metric the literature
+    uses; raw-space R is dominated by a few extreme points.
+    """
     d = d[[x, y]].dropna()
     n = len(d)
     if n < 2:
         return dict(n=n, bias=np.nan, rmse=np.nan, mae=np.nan,
-                    r=np.nan, slope=np.nan, intercept=np.nan)
-    diff = d[y].values - d[x].values
+                    r=np.nan, r_log=np.nan, slope=np.nan, intercept=np.nan)
+    xv = d[x].values
+    yv = d[y].values
+    diff = yv - xv
     bias = float(diff.mean())
     rmse = float(np.sqrt((diff ** 2).mean()))
     mae = float(np.abs(diff).mean())
     if d[x].std() > 0 and d[y].std() > 0:
-        r = float(np.corrcoef(d[x].values, d[y].values)[0, 1])
-        slope, intercept = np.polyfit(d[x].values, d[y].values, 1)
+        r = float(np.corrcoef(xv, yv)[0, 1])
+        slope, intercept = np.polyfit(xv, yv, 1)
+        lx = np.log10(np.clip(xv, log_floor, None))
+        ly = np.log10(np.clip(yv, log_floor, None))
+        r_log = float(np.corrcoef(lx, ly)[0, 1]) if lx.std() > 0 and ly.std() > 0 else np.nan
     else:
-        r = np.nan
+        r = r_log = np.nan
         slope = intercept = np.nan
-    return dict(n=n, bias=bias, rmse=rmse, mae=mae, r=r,
+    return dict(n=n, bias=bias, rmse=rmse, mae=mae, r=r, r_log=r_log,
                 slope=float(slope), intercept=float(intercept))
 
 
@@ -168,6 +179,7 @@ def cot_report(
     matches: pd.DataFrame,
     base_filter: Callable[[pd.DataFrame], pd.Series] | None = None,
     drop_attenuated: bool = True,
+    ice_only: bool = True,
 ) -> dict[str, pd.DataFrame]:
     """End-to-end cot statistics on a matches DataFrame.
 
@@ -179,6 +191,11 @@ def cot_report(
     the headline stats — they are lower bounds on τ and a fair point-by-
     point comparison with ORAC isn't possible. The dropped rows are still
     reported separately as ``sample_attenuated`` / ``pixel_attenuated``.
+
+    ``ice_only`` filters to ORAC ice-phase pixels (``phase_orac == 2``).
+    ATLID at 355 nm extincts in the first ~100 m of liquid cloud and the
+    inversion's lidar-ratio assumption is unreliable in liquid; ice clouds
+    are the only regime where ATLID column τ is comparable to ORAC.
 
     Returns a dict with keys ``sample`` and ``pixel`` mapping to the
     stratified-stats tables for each view, plus optional
@@ -195,6 +212,8 @@ def cot_report(
                 mask &= ~d["cot_orac_saturated"]
             if "valid_match" in d.columns:
                 mask &= d["valid_match"]
+            if ice_only and "phase_orac" in d.columns:
+                mask &= d["phase_orac"] == 2
             mask &= d["cot_atlid"].notna() & d["cot_orac"].notna()
             return mask
 

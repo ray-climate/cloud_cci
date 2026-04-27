@@ -59,6 +59,17 @@ def _query_slot(
 
     valid = np.isfinite(sl_lat) & np.isfinite(sl_lon)
     flat_idx = np.flatnonzero(valid.ravel())
+    if flat_idx.size == 0:
+        # Slot has no valid pixels (corrupt or all-fill). Return sentinel arrays
+        # so the caller can mark these matches as off-disk / unmatched.
+        n = atlid_lat.shape[0]
+        return (
+            np.full(n, -1, dtype=np.int64),
+            np.full(n, -1, dtype=np.int64),
+            np.full(n, np.nan),
+            np.full(n, np.nan),
+            np.full(n, np.nan),
+        )
     lat_flat = sl_lat.ravel()[flat_idx]
     lon_flat = sl_lon.ravel()[flat_idx]
 

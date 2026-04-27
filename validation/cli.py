@@ -106,6 +106,9 @@ def _process_frame_cot(
         # No SEVIRI slots in window — common for off-disk-only frames.
         print(f"  [{fid}] no SEVIRI slots: {e}", file=sys.stderr)
         return None, "empty"
+    except Exception as e:  # noqa: BLE001 — never let one bad frame kill the run
+        print(f"  [{fid}] match failed ({type(e).__name__}): {e}", file=sys.stderr)
+        return None, "fail"
 
     matches["cot_atlid"] = cot
     matches["attenuated"] = attenuated
@@ -115,9 +118,13 @@ def _process_frame_cot(
         # Frame fell entirely outside the SEVIRI footprint or time window.
         return None, "empty"
 
-    matches = open_seviri_at_matches(
-        matches, seviri_root, retrieval, ("cot", "cldmask")
-    )
+    try:
+        matches = open_seviri_at_matches(
+            matches, seviri_root, retrieval, ("cot", "cldmask")
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"  [{fid}] ORAC sample failed ({type(e).__name__}): {e}", file=sys.stderr)
+        return None, "fail"
     matches = matches.rename(columns={"cot": "cot_orac", "cldmask": "cldmask_orac"})
     matches["cot_orac_saturated"] = matches["cot_orac"] >= ORAC_COT_SATURATION
 

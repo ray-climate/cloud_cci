@@ -55,8 +55,9 @@ def _setup_axes(ax) -> None:
     ax.tick_params(direction="in", top=True, right=True, length=4)
     ax.set_xlabel(r"ATLID cloud top height [km]")
     ax.set_ylabel(r"ORAC SEVIRI $\mathrm{cth_{corrected}}$ [km]")
-    # Subtle 1:1 line, drawn after axis limits so it spans the plot.
-    ax.plot(CTH_LIM, CTH_LIM, color="0.35", lw=0.8, ls="--", zorder=1)
+    # 1:1 line drawn on top of the density / scatter layers (zorder 2) so
+    # the reference is visible across the dense ridge.
+    ax.plot(CTH_LIM, CTH_LIM, color="0.2", lw=0.9, ls="--", zorder=3)
 
 
 def _density_image(ax, x: np.ndarray, y: np.ndarray,

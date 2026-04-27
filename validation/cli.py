@@ -28,6 +28,7 @@ from .figures import bias_by_stratum, diagnostic_panel, scatter_panel
 from .readers import read_aebd_track
 from .reference import cot_from_aebd
 from .statistics import aggregate_to_pixel, cot_report, stratified_stats
+from .track_figures import track_panel
 
 DEFAULT_DRIVER_DIR = {
     "A-EBD": "ATL_EBD_2A",
@@ -120,12 +121,13 @@ def _process_frame_cot(
 
     try:
         matches = open_seviri_at_matches(
-            matches, seviri_root, retrieval, ("cot", "cldmask")
+            matches, seviri_root, retrieval, ("cot", "cldmask", "lsflag")
         )
     except Exception as e:  # noqa: BLE001
         print(f"  [{fid}] ORAC sample failed ({type(e).__name__}): {e}", file=sys.stderr)
         return None, "fail"
-    matches = matches.rename(columns={"cot": "cot_orac", "cldmask": "cldmask_orac"})
+    matches = matches.rename(columns={"cot": "cot_orac", "cldmask": "cldmask_orac",
+                                       "lsflag": "lsflag_orac"})
     matches["cot_orac_saturated"] = matches["cot_orac"] >= ORAC_COT_SATURATION
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -183,11 +185,10 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         matches["sev_scan_time"] = pd.to_datetime(matches["sev_scan_time"], errors="coerce")
 
     report = cot_report(matches)
-    sample = report["sample"].assign(view="sample")
-    pixel = report["pixel"].assign(view="pixel")
-    out = pd.concat([sample, pixel], ignore_index=True)
+    parts_out = [report[k].assign(view=k) for k in report]
+    out = pd.concat(parts_out, ignore_index=True)
     out.to_csv(out_csv, index=False)
-    print(f"Wrote {out_csv} ({len(out)} rows)")
+    print(f"Wrote {out_csv} ({len(out)} rows; views={list(report)})")
 
     if args.write_concat:
         concat_path = out_csv.with_suffix(".matches.csv")
@@ -209,7 +210,7 @@ def cmd_figures(args: argparse.Namespace) -> int:
     matches = pd.concat(parts, ignore_index=True)
     print(f"Loaded {len(matches)} rows from {len(paths)} CSVs")
 
-    base = matches[
+    base_all = matches[
         matches["valid_match"]
         & (matches["cldmask_orac"] == 1)
         & (matches["cot_atlid"] > 0)
@@ -217,6 +218,17 @@ def cmd_figures(args: argparse.Namespace) -> int:
         & matches["cot_atlid"].notna()
         & matches["cot_orac"].notna()
     ].copy()
+    # Headline view drops attenuated (τ lower bounds, not point-comparable
+    # to ORAC). Diagnostic panel keeps them so the attenuated class is
+    # visible alongside non-attenuated.
+    if "attenuated" in base_all.columns:
+        att_mask = base_all["attenuated"].fillna(False).astype(bool)
+        base = base_all[~att_mask]
+        n_att = int(att_mask.sum())
+        print(f"Base (all): {len(base_all)}  attenuated dropped: {n_att}  "
+              f"headline base: {len(base)}")
+    else:
+        base = base_all
     pix = aggregate_to_pixel(base, "cot_atlid", "cot_orac")
     print(f"Sample-level: {len(base)}  Pixel-aggregate: {len(pix)}")
 
@@ -224,7 +236,7 @@ def cmd_figures(args: argparse.Namespace) -> int:
     suptitle = args.label or "cot validation"
     scatter_panel(base, pix, suptitle=f"{suptitle} — scatter",
                   out=out_dir / "cot_scatter.png")
-    diagnostic_panel(base, suptitle=f"{suptitle} — diagnostic",
+    diagnostic_panel(base_all, suptitle=f"{suptitle} — diagnostic",
                      out=out_dir / "cot_diagnostic.png")
 
     sample_stats = stratified_stats(base, "cot_atlid", "cot_orac")
@@ -239,6 +251,26 @@ def cmd_figures(args: argparse.Namespace) -> int:
                     title=f"{suptitle} — R by stratum (pixel)",
                     out=out_dir / "cot_r_by_stratum_pixel.png")
     print(f"Wrote 5 PNGs to {out_dir}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# track-plot
+# ---------------------------------------------------------------------------
+
+def cmd_track(args: argparse.Namespace) -> int:
+    matches_csv = Path(args.matches_dir) / f"matches_cot_{args.frame}.csv"
+    if not matches_csv.exists():
+        print(f"matches CSV not found: {matches_csv}", file=sys.stderr)
+        return 1
+    df = pd.read_csv(matches_csv)
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    track_panel(
+        args.frame, df, args.seviri_root, retrieval=args.retrieval,
+        out=out_path,
+    )
+    print(f"Wrote {out_path}")
     return 0
 
 
@@ -271,6 +303,15 @@ def build_parser() -> argparse.ArgumentParser:
     f.add_argument("--out", required=True, help="Output figure directory")
     f.add_argument("--label", default="", help="Title prefix")
     f.set_defaults(func=cmd_figures)
+
+    t = sub.add_parser("track-plot", help="Per-orbit case-study figure for one frame.")
+    t.add_argument("--frame", required=True, help="A-EBD frame ID, e.g. 09737D")
+    t.add_argument("--matches-dir", required=True,
+                   help="Dir holding matches_cot_<frame>.csv files")
+    t.add_argument("--seviri-root", default=str(SEVIRI_ROOT_DEFAULT))
+    t.add_argument("--retrieval", default=DEFAULT_RETRIEVAL, choices=("R10", "R11"))
+    t.add_argument("--out", required=True, help="Output PNG path")
+    t.set_defaults(func=cmd_track)
 
     return p
 

@@ -599,6 +599,16 @@ def cmd_cth_compare(args: argparse.Namespace) -> int:
         suptitle=f"{suptitle} — pixel-aggregate (mean cloudy ATLID)",
         out=out_dir / "compare_R10_R11_scatter_pixel.png",
     )
+    cth_figures.scatter_compare_by_surface(
+        sample_r10, sample_r11,
+        suptitle=f"{suptitle} — sample-level by surface",
+        out=out_dir / "compare_R10_R11_scatter_sample_by_surface.png",
+    )
+    cth_figures.scatter_compare_by_surface(
+        pixel_r10, pixel_r11,
+        suptitle=f"{suptitle} — pixel-aggregate by surface",
+        out=out_dir / "compare_R10_R11_scatter_pixel_by_surface.png",
+    )
 
     s10 = stratified_stats(sample_r10, "cth_atlid_thick_km",
                            "cth_orac_corrected_km", strata=cth_strata())

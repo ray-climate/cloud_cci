@@ -1,17 +1,24 @@
 """Plotting helpers for cth validation reports.
 
-Linear-axis variants of :mod:`validation.figures` — CTH is roughly linear
-on [0, 18] km, so log-clipping (used for cot) would compress the
-informative high-cirrus regime.
+Linear-axis variants of :mod:`validation.figures`. CTH is approximately
+linear on [0, 18] km, so log-clipping (cot convention) would compress
+the informative high-cirrus regime.
 
-Three reusable panels:
+The scatter panels use a 2D-histogram density plot (`np.histogram2d` +
+`imshow` with `LogNorm`) rather than hexbin, for a cleaner
+publication-quality look. Colourbars are sized via
+`make_axes_locatable` so they exactly match the data-axes height.
 
-- :func:`scatter_panel`     : sample-level + pixel-aggregate hexbin.
-- :func:`diagnostic_panel`  : 2×2 scatter coloured by lat / dist / Δt
-                              / ATLID cloud_class.
-- :func:`qc_sensitivity_panel` : bar chart of bias and N across QC modes,
-                              built directly from a :func:`cth_report`
-                              stats table.
+Reusable panels:
+
+- :func:`scatter_panel`            : sample + pixel side-by-side density.
+- :func:`scatter_compare`          : R10 vs R11 density, single view.
+- :func:`scatter_compare_by_surface`: R10 vs R11 × ocean vs land, 2×2.
+- :func:`diagnostic_panel`         : 2×2 scatter coloured by lat / dist /
+                                      Δt / ATLID cloud_class.
+- :func:`bias_by_stratum`          : single-retrieval stratum bar chart.
+- :func:`bias_bar_compare`         : R10 vs R11 stratum bar chart.
+- :func:`qc_sensitivity_panel`     : bias / RMSE / R / N across QC modes.
 """
 from __future__ import annotations
 
@@ -20,9 +27,13 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.colors import LogNorm
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 CTH_LIM = (0, 18)
 CTH_TICKS = (0, 3, 6, 9, 12, 15, 18)
+DENSITY_BINS = 60
+DENSITY_CMAP = "viridis"
 
 
 def _stats(d: pd.DataFrame, x: str, y: str) -> tuple[int, float, float, float]:
@@ -38,12 +49,72 @@ def _stats(d: pd.DataFrame, x: str, y: str) -> tuple[int, float, float, float]:
 
 
 def _setup_axes(ax) -> None:
-    ax.plot(CTH_LIM, CTH_LIM, "k--", lw=0.8)
     ax.set_xlim(CTH_LIM); ax.set_ylim(CTH_LIM)
     ax.set_xticks(CTH_TICKS); ax.set_yticks(CTH_TICKS)
-    ax.set_aspect("equal")
-    ax.set_xlabel("ATLID cloud top height [km]")
-    ax.set_ylabel("ORAC SEVIRI cth_corrected [km]")
+    ax.set_aspect("equal", adjustable="box")
+    ax.tick_params(direction="in", top=True, right=True, length=4)
+    ax.set_xlabel(r"ATLID cloud top height [km]")
+    ax.set_ylabel(r"ORAC SEVIRI $\mathrm{cth_{corrected}}$ [km]")
+    # Subtle 1:1 line, drawn after axis limits so it spans the plot.
+    ax.plot(CTH_LIM, CTH_LIM, color="0.35", lw=0.8, ls="--", zorder=1)
+
+
+def _density_image(ax, x: np.ndarray, y: np.ndarray,
+                   bins: int = DENSITY_BINS, cmap: str = DENSITY_CMAP):
+    """2D-histogram density on ``ax`` with `LogNorm` colour scale.
+
+    Returns the AxesImage handle so the caller can attach a colourbar.
+    Counts of zero are masked → transparent (background shows through).
+    """
+    H, xedges, yedges = np.histogram2d(
+        x, y, bins=bins, range=[CTH_LIM, CTH_LIM]
+    )
+    H = H.T  # imshow expects (y, x)
+    Hm = np.ma.masked_where(H == 0, H)
+    extent = (xedges[0], xedges[-1], yedges[0], yedges[-1])
+    vmin = 1.0
+    vmax = max(2.0, float(Hm.max())) if Hm.count() else 2.0
+    im = ax.imshow(
+        Hm, origin="lower", extent=extent, cmap=cmap,
+        norm=LogNorm(vmin=vmin, vmax=vmax),
+        interpolation="nearest", aspect="equal", zorder=2,
+    )
+    return im
+
+
+def _attach_colorbar(fig, ax, im, label: str = "count"):
+    """Attach a colourbar on the right with the same height as ``ax``."""
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="4.5%", pad=0.08)
+    cb = fig.colorbar(im, cax=cax)
+    cb.set_label(label)
+    cb.ax.tick_params(direction="in", length=3)
+    return cb
+
+
+def _stat_text(ax, n: int, bias: float, rmse: float, r: float, *,
+               loc: tuple[float, float] = (0.04, 0.96)) -> None:
+    """Stats annotation in the upper-left of ``ax``."""
+    txt = (
+        f"$N$ = {n:,}\n"
+        f"bias = {bias:+.2f} km\n"
+        f"RMSE = {rmse:.2f} km\n"
+        f"$R$ = {r:.2f}"
+    )
+    ax.text(
+        loc[0], loc[1], txt, transform=ax.transAxes,
+        ha="left", va="top", fontsize=9,
+        bbox=dict(boxstyle="round,pad=0.32", fc="white",
+                  ec="0.5", lw=0.6, alpha=0.85),
+        zorder=4,
+    )
+
+
+def _save(fig: plt.Figure, out: str | Path | None) -> plt.Figure:
+    if out is not None:
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out, dpi=300, bbox_inches="tight")
+    return fig
 
 
 def scatter_panel(
@@ -54,28 +125,24 @@ def scatter_panel(
     suptitle: str = "",
     out: str | Path | None = None,
 ) -> plt.Figure:
-    """Side-by-side hexbin: sample-level vs pixel-aggregate, linear km."""
-    fig, axes = plt.subplots(1, 2, figsize=(13, 6.0))
+    """Side-by-side density: sample-level vs pixel-aggregate."""
+    fig, axes = plt.subplots(1, 2, figsize=(11.5, 5.5))
     for ax, d, label in [
         (axes[0], sample, "sample-level (nearest ATLID)"),
         (axes[1], pixel, "pixel-aggregate (mean cloudy ATLID)"),
     ]:
         d2 = d[[x, y]].dropna()
         n, bias, rmse, r = _stats(d2, x, y)
-        if n >= 2:
-            hb = ax.hexbin(d2[x].values, d2[y].values,
-                           gridsize=40, mincnt=1, bins="log",
-                           extent=(*CTH_LIM, *CTH_LIM), cmap="viridis")
-            fig.colorbar(hb, ax=ax, label="count (log)")
         _setup_axes(ax)
-        ax.set_title(f"{label}  (N={n})\nbias={bias:+.2f}  RMSE={rmse:.2f}  R={r:.2f}")
+        if n >= 2:
+            im = _density_image(ax, d2[x].values, d2[y].values)
+            _attach_colorbar(fig, ax, im, label="count")
+        _stat_text(ax, n, bias, rmse, r)
+        ax.set_title(label, pad=6)
     if suptitle:
-        fig.suptitle(suptitle, fontsize=12)
+        fig.suptitle(suptitle, fontsize=11, y=1.02)
     fig.tight_layout()
-    if out is not None:
-        Path(out).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(out, dpi=150)
-    return fig
+    return _save(fig, out)
 
 
 def diagnostic_panel(
@@ -86,48 +153,52 @@ def diagnostic_panel(
     out: str | Path | None = None,
 ) -> plt.Figure:
     """2×2 scatter coloured by lat / dist / Δt / ATLID cloud class."""
-    fig, axes = plt.subplots(2, 2, figsize=(12, 11))
+    fig, axes = plt.subplots(2, 2, figsize=(11.5, 10.5))
     cols = [x, y, "ec_lat", "distance_km", "time_diff_s", "cloud_class_atlid"]
     d = sample[cols].dropna(subset=[x, y])
     xv, yv = d[x].values, d[y].values
 
-    sc = axes[0, 0].scatter(xv, yv, c=d["ec_lat"], cmap="viridis",
-                            s=4, alpha=0.6, vmin=-60, vmax=60)
-    fig.colorbar(sc, ax=axes[0, 0], label="latitude [deg]")
-    axes[0, 0].set_title("(a) coloured by latitude")
+    panels = [
+        (axes[0, 0], d["ec_lat"].values,        "viridis", -60, 60,
+         "latitude [deg]",          "(a) latitude"),
+        (axes[0, 1], d["distance_km"].values,    "plasma",   0,  6,
+         "match distance [km]",     "(b) match distance"),
+        (axes[1, 0], d["time_diff_s"].values,    "cividis",  0, 450,
+         r"$|\Delta t|$ [s]",       "(c) time offset"),
+    ]
+    for ax, c, cmap, vmin, vmax, cb_label, title in panels:
+        _setup_axes(ax)
+        sc = ax.scatter(xv, yv, c=c, cmap=cmap, s=3, alpha=0.55,
+                        vmin=vmin, vmax=vmax, zorder=2,
+                        edgecolors="none", rasterized=True)
+        _attach_colorbar(fig, ax, sc, label=cb_label)
+        ax.set_title(title, pad=6)
 
-    sc = axes[0, 1].scatter(xv, yv, c=d["distance_km"], cmap="plasma",
-                            s=4, alpha=0.6, vmin=0, vmax=6)
-    fig.colorbar(sc, ax=axes[0, 1], label="dist to SEVIRI pixel [km]")
-    axes[0, 1].set_title("(b) coloured by match distance")
-
-    sc = axes[1, 0].scatter(xv, yv, c=d["time_diff_s"], cmap="cividis",
-                            s=4, alpha=0.6, vmin=0, vmax=450)
-    fig.colorbar(sc, ax=axes[1, 0], label="|Δt| [s]")
-    axes[1, 0].set_title("(c) coloured by time offset")
-
-    # Cloud-class colouring with categorical legend.
-    class_names = {1: "thick", 2: "thin", 3: "thin/thick", 4: "thick/thick", 5: "thin/thin"}
-    palette = {1: "tab:blue", 2: "tab:orange", 3: "tab:green",
-               4: "tab:red", 5: "tab:purple"}
+    # Cloud-class panel: categorical legend, no colourbar — but match height.
+    ax = axes[1, 1]
+    _setup_axes(ax)
+    class_names = {1: "thick", 2: "thin", 3: "thin/thick",
+                   4: "thick/thick", 5: "thin/thin"}
+    palette = {1: "#1f77b4", 2: "#ff7f0e", 3: "#2ca02c",
+               4: "#d62728", 5: "#9467bd"}
     for cls, name in class_names.items():
         sub = d[d["cloud_class_atlid"] == cls]
         if len(sub) == 0:
             continue
-        axes[1, 1].scatter(sub[x], sub[y], s=6, alpha=0.7,
-                           c=palette[cls], label=f"{name} (N={len(sub)})")
-    axes[1, 1].legend(loc="lower right", fontsize=8)
-    axes[1, 1].set_title("(d) coloured by ATLID cloud class")
+        ax.scatter(sub[x], sub[y], s=4, alpha=0.6,
+                   c=palette[cls], label=f"{name} ($N$={len(sub):,})",
+                   edgecolors="none", zorder=2, rasterized=True)
+    ax.legend(loc="lower right", fontsize=8, frameon=True, framealpha=0.9)
+    ax.set_title("(d) ATLID cloud class", pad=6)
+    # Reserve right margin to keep alignment with the colourbarred panels.
+    divider = make_axes_locatable(ax)
+    spacer = divider.append_axes("right", size="4.5%", pad=0.08)
+    spacer.axis("off")
 
-    for ax in axes.flat:
-        _setup_axes(ax)
     if suptitle:
-        fig.suptitle(suptitle, fontsize=12)
+        fig.suptitle(suptitle, fontsize=11, y=1.0)
     fig.tight_layout()
-    if out is not None:
-        Path(out).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(out, dpi=150)
-    return fig
+    return _save(fig, out)
 
 
 def bias_by_stratum(
@@ -172,25 +243,58 @@ def scatter_compare(
     suptitle: str = "",
     out: str | Path | None = None,
 ) -> plt.Figure:
-    """1×2 hexbin scatter, R10 left vs R11 right, linear km."""
-    fig, axes = plt.subplots(1, 2, figsize=(13, 6.0))
+    """1×2 density scatter, R10 left vs R11 right."""
+    fig, axes = plt.subplots(1, 2, figsize=(11.5, 5.5))
     for ax, d, label in [(axes[0], d_r10, "R10"), (axes[1], d_r11, "R11")]:
         d2 = d[[x, y]].dropna()
         n, bias, rmse, r = _stats(d2, x, y)
-        if n >= 2:
-            hb = ax.hexbin(d2[x].values, d2[y].values,
-                           gridsize=40, mincnt=1, bins="log",
-                           extent=(*CTH_LIM, *CTH_LIM), cmap="viridis")
-            fig.colorbar(hb, ax=ax, label="count (log)")
         _setup_axes(ax)
-        ax.set_title(f"{label}  (N={n})\nbias={bias:+.2f}  RMSE={rmse:.2f}  R={r:.2f}")
+        if n >= 2:
+            im = _density_image(ax, d2[x].values, d2[y].values)
+            _attach_colorbar(fig, ax, im, label="count")
+        _stat_text(ax, n, bias, rmse, r)
+        ax.set_title(label, pad=6)
     if suptitle:
-        fig.suptitle(suptitle, fontsize=12)
+        fig.suptitle(suptitle, fontsize=11, y=1.02)
     fig.tight_layout()
-    if out is not None:
-        Path(out).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(out, dpi=150)
-    return fig
+    return _save(fig, out)
+
+
+def scatter_compare_by_surface(
+    d_r10: pd.DataFrame,
+    d_r11: pd.DataFrame,
+    x: str = "cth_atlid_thick_km",
+    y: str = "cth_orac_corrected_km",
+    lsflag_col: str = "lsflag_orac",
+    suptitle: str = "",
+    out: str | Path | None = None,
+) -> plt.Figure:
+    """2×2 density scatter — rows: ocean / land, cols: R10 / R11.
+
+    The land/ocean split uses ORAC ``lsflag_orac`` (0 = sea, 1 = land).
+    Each panel reports its own N, bias, RMSE, R in the upper-left box.
+    """
+    fig, axes = plt.subplots(2, 2, figsize=(11.5, 10.5))
+    surfaces = (
+        ("Ocean", lambda d: d[lsflag_col] < 0.5),
+        ("Land",  lambda d: d[lsflag_col] >= 0.5),
+    )
+    retrievals = (("R10", d_r10), ("R11", d_r11))
+    for i, (s_name, mask_fn) in enumerate(surfaces):
+        for j, (r_name, d) in enumerate(retrievals):
+            ax = axes[i, j]
+            d2 = d.loc[mask_fn(d).fillna(False), [x, y]].dropna()
+            n, bias, rmse, r = _stats(d2, x, y)
+            _setup_axes(ax)
+            if n >= 2:
+                im = _density_image(ax, d2[x].values, d2[y].values)
+                _attach_colorbar(fig, ax, im, label="count")
+            _stat_text(ax, n, bias, rmse, r)
+            ax.set_title(f"{r_name} — {s_name}", pad=6)
+    if suptitle:
+        fig.suptitle(suptitle, fontsize=11, y=1.0)
+    fig.tight_layout()
+    return _save(fig, out)
 
 
 def bias_bar_compare(

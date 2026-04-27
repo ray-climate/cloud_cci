@@ -88,3 +88,32 @@ def cot_from_aebd(
         attenuated = np.zeros(ext.shape[0], dtype=bool)
 
     return cot, attenuated
+
+
+def cth_from_acth(
+    cth_thick: np.ndarray,
+    cth_raw: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Per-profile ORAC-equivalent CTH from A-CTH, in **kilometres** AMSL.
+
+    ATLID stores heights in metres above the geoid; ORAC SEVIRI
+    ``cth_corrected`` is ``cloud_top_altitude`` in km AMSL. Conversion is
+    m → km, no geoid shift. No QC is applied — the matches CSV carries
+    ``quality_status``, ``cth_confidence``, ``cloud_class``, and
+    ``tropopause_km_atlid`` so QC choices can be made as strata at
+    evaluate time. Fill values arrive as NaN from :func:`read_acth_track`.
+
+    Parameters
+    ----------
+    cth_thick, cth_raw
+        ``(n_profile,)`` heights from :func:`read_acth_track`
+        (metres AMSL, NaN where fill).
+
+    Returns
+    -------
+    cth_thick_km, cth_raw_km
+        ``(n_profile,)`` heights in km AMSL.
+    """
+    thick_km = np.asarray(cth_thick, dtype=np.float64) / 1000.0
+    raw_km = np.asarray(cth_raw, dtype=np.float64) / 1000.0
+    return thick_km, raw_km

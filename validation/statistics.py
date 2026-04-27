@@ -240,3 +240,178 @@ def cot_report(
             "cot_atlid", "cot_orac",
         )
     return out
+
+
+# ---------------------------------------------------------------------------
+# CTH report
+# ---------------------------------------------------------------------------
+
+def cth_strata(
+    cth_atlid_col: str = "cth_atlid_thick_km",
+    lat_col: str = "ec_lat",
+    dist_col: str = "distance_km",
+    tdiff_col: str = "time_diff_s",
+    lsflag_col: str = "lsflag_orac",
+    class_col: str = "cloud_class_atlid",
+) -> dict[str, StratumFn | None]:
+    """Default stratification for cth validation. ``None`` = no filter (full sample)."""
+    return {
+        "all": None,
+        "ocean": lambda d: (d[lsflag_col] < 0.5) if lsflag_col in d.columns else pd.Series(False, index=d.index),
+        "land":  lambda d: (d[lsflag_col] >= 0.5) if lsflag_col in d.columns else pd.Series(False, index=d.index),
+        "lat_tropics": lambda d: np.abs(d[lat_col]) < 30,
+        "lat_midlat":  lambda d: (np.abs(d[lat_col]) >= 30) & (np.abs(d[lat_col]) < 60),
+        "lat_polar":   lambda d: np.abs(d[lat_col]) >= 60,
+        "cth_low":  lambda d: d[cth_atlid_col] < 3,
+        "cth_mid":  lambda d: (d[cth_atlid_col] >= 3) & (d[cth_atlid_col] < 7),
+        "cth_high": lambda d: d[cth_atlid_col] >= 7,
+        "dist_lt2km":   lambda d: d[dist_col] < 2,
+        "dist_2_5km":   lambda d: (d[dist_col] >= 2) & (d[dist_col] < 5),
+        "dist_ge5km":   lambda d: d[dist_col] >= 5,
+        "tdiff_lt3min": lambda d: d[tdiff_col] < 180,
+        "tdiff_ge3min": lambda d: d[tdiff_col] >= 180,
+        # Per-profile ATLID class. cloud_class -127 / 0 / 6 are filtered by the
+        # base mask (no useful CTH); 1=thick, 2=thin, 3=thin-over-thick,
+        # 4=thick-over-thick, 5=thin-over-thin.
+        "class_thick":            lambda d: d[class_col] == 1 if class_col in d.columns else pd.Series(False, index=d.index),
+        "class_thin":             lambda d: d[class_col] == 2 if class_col in d.columns else pd.Series(False, index=d.index),
+        "class_thin_over_thick":  lambda d: d[class_col] == 3 if class_col in d.columns else pd.Series(False, index=d.index),
+        "class_thick_over_thick": lambda d: d[class_col] == 4 if class_col in d.columns else pd.Series(False, index=d.index),
+    }
+
+
+# QC base filters — applied before sample-level dedupe / pixel aggregation. Each
+# returns a boolean mask over a per-profile matches DataFrame.
+def _qc_off(d: pd.DataFrame) -> pd.Series:
+    """All cloudy-and-paired rows; no ATLID QC restriction."""
+    return pd.Series(True, index=d.index)
+
+
+def _qc_strict(d: pd.DataFrame) -> pd.Series:
+    """``quality_status == 0 & confidence >= 5 & cth_thick ≤ trop + 2 km``."""
+    return (
+        (d["quality_status_atlid"] == 0)
+        & (d["confidence_atlid"] >= 5)
+        & (d["cth_atlid_thick_km"] <= d["tropopause_km_atlid"] + 2)
+    )
+
+
+def _qc_relaxed(d: pd.DataFrame) -> pd.Series:
+    """``quality_status ∈ {0,1} & confidence >= 3 & cth_thick ≤ trop + 2 km``."""
+    return (
+        (d["quality_status_atlid"].isin([0, 1]))
+        & (d["confidence_atlid"] >= 3)
+        & (d["cth_atlid_thick_km"] <= d["tropopause_km_atlid"] + 2)
+    )
+
+
+def _qc_no_trop_cap(d: pd.DataFrame) -> pd.Series:
+    """Strict QS+confidence, no tropopause cap (exposes stratospheric tail)."""
+    return (d["quality_status_atlid"] == 0) & (d["confidence_atlid"] >= 5)
+
+
+CTH_QC_MODES: dict[str, Callable[[pd.DataFrame], pd.Series]] = {
+    "qc_off":         _qc_off,
+    "qc_strict":      _qc_strict,
+    "qc_relaxed":     _qc_relaxed,
+    "qc_no_trop_cap": _qc_no_trop_cap,
+}
+
+
+def aggregate_to_pixel_cth(matches: pd.DataFrame) -> pd.DataFrame:
+    """Pixel-aggregate for CTH. ATLID side = mean over cloudy profiles, ORAC
+    side = ``first`` (constant within pixel by construction).
+
+    Clear-sky ATLID profiles (``quality_status == -1``) carry NaN
+    ``cth_atlid_thick_km`` from :func:`cth_from_acth` — pandas `mean`
+    skips NaN, so the aggregation is automatically over cloudy profiles
+    only. ``n_atlid`` is total profiles in the pixel; ``n_atlid_cloudy``
+    is the count of cloudy ones (the cloud fraction = the ratio).
+
+    Independent of :func:`aggregate_to_pixel`, which uses ``mean`` for
+    both var_atlid and var_orac and is shaped around cot.
+    """
+    extras_first = [c for c in ("lsflag_orac", "phase_orac",
+                                "cth_orac_uncertainty_km",
+                                "cth_orac_corrected_uncertainty_km") if c in matches.columns]
+    agg = {
+        "cth_atlid_thick_km": ("cth_atlid_thick_km", "mean"),
+        "cth_atlid_raw_km":   ("cth_atlid_raw_km", "mean"),
+        "cth_orac_corrected_km": ("cth_orac_corrected_km", "first"),
+        "cth_orac_km":           ("cth_orac_km", "first"),
+        "n_atlid": ("cth_atlid_thick_km", "size"),
+        "n_atlid_cloudy": ("cth_atlid_thick_km", "count"),
+        "ec_lat": ("ec_lat", "mean"),
+        "distance_km": ("distance_km", "mean"),
+        "time_diff_s": ("time_diff_s", "mean"),
+        # Class within a SEVIRI pixel is rarely mixed; first is good enough.
+        "cloud_class_atlid": ("cloud_class_atlid", "first"),
+        "quality_status_atlid": ("quality_status_atlid", "max"),  # worst-of
+        "confidence_atlid": ("confidence_atlid", "min"),          # worst-of
+        "tropopause_km_atlid": ("tropopause_km_atlid", "mean"),
+        **{c: (c, "first") for c in extras_first},
+    }
+    return matches.groupby(["sev_scan_time", "sev_pixel_id"], as_index=False).agg(**agg)
+
+
+def dedupe_to_sample(matches: pd.DataFrame) -> pd.DataFrame:
+    """Sample-level view: one row per SEVIRI pixel, nearest ATLID profile.
+
+    Selection: per ``sev_pixel_id`` pick the row with the smallest
+    ``distance_km`` (haversine to pixel centre). All columns from that row
+    are kept as-is — no aggregation.
+    """
+    idx = matches.groupby("sev_pixel_id")["distance_km"].idxmin()
+    return matches.loc[idx].reset_index(drop=True)
+
+
+def cth_report(
+    matches: pd.DataFrame,
+    qc_modes: tuple[str, ...] = ("qc_off", "qc_strict", "qc_relaxed", "qc_no_trop_cap"),
+    var_atlid: str = "cth_atlid_thick_km",
+    var_orac: str = "cth_orac_corrected_km",
+) -> pd.DataFrame:
+    """End-to-end CTH stratified stats across QC modes and views.
+
+    For each ``qc_mode`` the matches DataFrame is filtered (base = cloudy in
+    ORAC, finite ATLID/ORAC CTH, valid_match, plus the QC predicate), then
+    two views are built:
+
+    - ``sample`` — dedupe to one row per SEVIRI pixel, nearest ATLID profile.
+    - ``pixel``  — groupby ``sev_pixel_id`` with ATLID = ``max``.
+
+    Each view is then stratified with :func:`cth_strata`. Returns a single
+    tidy table with columns ``(qc_mode, view, stratum, n, bias, rmse, mae,
+    r, slope, intercept)``.
+    """
+    base_mask = (
+        matches["valid_match"]
+        & (matches["cldmask_orac"] == 1)
+        & matches[var_atlid].notna()
+        & matches[var_orac].notna()
+    )
+    base = matches[base_mask].copy()
+
+    rows: list[pd.DataFrame] = []
+    for qc in qc_modes:
+        if qc not in CTH_QC_MODES:
+            raise ValueError(f"Unknown qc_mode {qc!r}; known: {list(CTH_QC_MODES)}")
+        qc_mask = CTH_QC_MODES[qc](base).fillna(False)
+        sub = base[qc_mask]
+        if sub.empty:
+            continue
+
+        sample = dedupe_to_sample(sub)
+        pixel = aggregate_to_pixel_cth(sub)
+
+        s_stats = stratified_stats(sample, var_atlid, var_orac, strata=cth_strata())
+        p_stats = stratified_stats(pixel, var_atlid, var_orac, strata=cth_strata())
+        rows.append(s_stats.assign(qc_mode=qc, view="sample"))
+        rows.append(p_stats.assign(qc_mode=qc, view="pixel"))
+
+    if not rows:
+        return pd.DataFrame(columns=[
+            "qc_mode", "view", "stratum", "n", "bias", "rmse", "mae",
+            "r", "r_log", "slope", "intercept",
+        ])
+    return pd.concat(rows, ignore_index=True)

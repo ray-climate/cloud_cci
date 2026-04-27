@@ -25,10 +25,14 @@ import pandas as pd
 
 from .collocate import match_track_to_seviri, open_seviri_at_matches
 from .figures import bias_by_stratum, diagnostic_panel, scatter_panel
-from .readers import read_aebd_track
-from .reference import cot_from_aebd
+from .readers import read_aebd_track, read_acth_track
+from .reference import cot_from_aebd, cth_from_acth
 from .compare_figures import bias_bar_compare, scatter_compare
-from .statistics import aggregate_to_pixel, cot_report, stratified_stats
+from . import cth_figures
+from .statistics import (
+    CTH_QC_MODES, aggregate_to_pixel, aggregate_to_pixel_cth, cot_report,
+    cth_report, cth_strata, dedupe_to_sample, stratified_stats,
+)
 from .track_figures import track_panel
 
 DEFAULT_DRIVER_DIR = {
@@ -166,6 +170,121 @@ def cmd_collocate(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# cth-collocate (A-CTH driver)
+# ---------------------------------------------------------------------------
+
+# ORAC vars sampled at each matched SEVIRI pixel for the CTH validation.
+# Keep both raw and parallax-corrected so the corrected-vs-raw diagnostic is
+# possible without re-running collocation.
+_CTH_ORAC_VARS = (
+    "cth", "cth_corrected", "cth_uncertainty", "cth_corrected_uncertainty",
+    "cldmask", "lsflag", "phase",
+)
+
+
+def _process_frame_cth(
+    path: Path, seviri_root: Path, retrieval: str, out_dir: Path
+) -> tuple[Path | None, str]:
+    """Match one A-CTH frame and write matches_cth_<frame_id>.csv.
+
+    No QC is applied at this stage — the CSV carries the raw ATLID
+    ``quality_status``, ``confidence``, ``cloud_class``, and per-profile
+    ``tropopause_km`` so QC choices are made as strata at evaluate time.
+
+    Returns ``(out_path, status)``. Status: ``done`` / ``skip`` / ``empty``
+    / ``fail``, matching the cot path.
+    """
+    frame_id = _frame_metadata(path)
+    if frame_id is None:
+        return None, "fail"
+    fid = frame_id[0]
+    out_csv = out_dir / f"matches_cth_{fid}.csv"
+    if out_csv.exists() and out_csv.stat().st_size > 0:
+        return out_csv, "skip"
+
+    try:
+        track = read_acth_track(path)
+    except Exception as e:  # noqa: BLE001
+        print(f"  [{fid}] read failed: {e}", file=sys.stderr)
+        return None, "fail"
+
+    cth_thick_km, cth_raw_km = cth_from_acth(track["cth_thick"], track["cth_raw"])
+
+    try:
+        matches = match_track_to_seviri(
+            track["lat"], track["lon"], track["time"],
+            seviri_root, retrieval=retrieval,
+        )
+    except RuntimeError as e:
+        print(f"  [{fid}] no SEVIRI slots: {e}", file=sys.stderr)
+        return None, "empty"
+    except Exception as e:  # noqa: BLE001
+        print(f"  [{fid}] match failed ({type(e).__name__}): {e}", file=sys.stderr)
+        return None, "fail"
+
+    matches["cth_atlid_thick_km"] = cth_thick_km
+    matches["cth_atlid_raw_km"] = cth_raw_km
+    matches["quality_status_atlid"] = track["quality_status"]
+    matches["confidence_atlid"] = track["cth_confidence"]
+    matches["cloud_class_atlid"] = track["cloud_class"]
+    matches["tropopause_km_atlid"] = track["tropopause_height_wmo"] / 1000.0
+    matches["frame_id"] = fid
+
+    if not matches["valid_match"].any():
+        return None, "empty"
+
+    try:
+        matches = open_seviri_at_matches(
+            matches, seviri_root, retrieval, _CTH_ORAC_VARS
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"  [{fid}] ORAC sample failed ({type(e).__name__}): {e}", file=sys.stderr)
+        return None, "fail"
+    matches = matches.rename(columns={
+        "cth": "cth_orac_km",
+        "cth_corrected": "cth_orac_corrected_km",
+        "cth_uncertainty": "cth_orac_uncertainty_km",
+        "cth_corrected_uncertainty": "cth_orac_corrected_uncertainty_km",
+        "cldmask": "cldmask_orac",
+        "lsflag": "lsflag_orac",
+        "phase": "phase_orac",
+    })
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    matches.to_csv(out_csv, index=False)
+    return out_csv, "done"
+
+
+def cmd_cth_collocate(args: argparse.Namespace) -> int:
+    start = datetime.fromisoformat(args.start.replace("Z", "+00:00"))
+    end = datetime.fromisoformat(args.end.replace("Z", "+00:00"))
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+
+    frames = _enumerate_frames("A-CTH", start, end)
+    print(f"Found {len(frames)} A-CTH frames in [{start}, {end})")
+    if not frames:
+        return 0
+
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    counts = {"done": 0, "skip": 0, "empty": 0, "fail": 0}
+    for i, path in enumerate(frames, 1):
+        meta = _frame_metadata(path)
+        fid = meta[0] if meta else "?"
+        out_path, status = _process_frame_cth(
+            path, Path(args.seviri_root), args.retrieval, out_dir
+        )
+        counts[status] += 1
+        marker = {"done": "✓", "skip": "·", "empty": "○", "fail": "✗"}[status]
+        print(f"  [{i:4d}/{len(frames)}] {marker} {fid:>8} → {status}")
+    print(f"Summary: {counts}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # evaluate
 # ---------------------------------------------------------------------------
 
@@ -199,6 +318,37 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# cth-evaluate
+# ---------------------------------------------------------------------------
+
+def cmd_cth_evaluate(args: argparse.Namespace) -> int:
+    paths = sorted(glob(args.matches))
+    if not paths:
+        print(f"No matches CSVs at {args.matches}", file=sys.stderr)
+        return 1
+    parts = [pd.read_csv(p) for p in paths]
+    matches = pd.concat(parts, ignore_index=True)
+    print(f"Concatenated {len(paths)} CSVs → {len(matches)} rows")
+
+    if "sev_scan_time" in matches.columns:
+        matches["sev_scan_time"] = pd.to_datetime(matches["sev_scan_time"], errors="coerce")
+
+    out = cth_report(matches)
+    out_csv = Path(args.out)
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    out.to_csv(out_csv, index=False)
+    print(f"Wrote {out_csv} ({len(out)} rows; "
+          f"qc_modes={sorted(out['qc_mode'].unique())}, "
+          f"views={sorted(out['view'].unique())})")
+
+    if args.write_concat:
+        concat_path = out_csv.with_suffix(".matches.csv")
+        matches.to_csv(concat_path, index=False)
+        print(f"Wrote concatenated matches to {concat_path}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # figures
 # ---------------------------------------------------------------------------
 
@@ -211,14 +361,18 @@ def cmd_figures(args: argparse.Namespace) -> int:
     matches = pd.concat(parts, ignore_index=True)
     print(f"Loaded {len(matches)} rows from {len(paths)} CSVs")
 
-    base_all = matches[
-        matches["valid_match"]
-        & (matches["cldmask_orac"] == 1)
-        & (matches["cot_atlid"] > 0)
-        & (~matches["cot_orac_saturated"])
-        & matches["cot_atlid"].notna()
-        & matches["cot_orac"].notna()
-    ].copy()
+    base_mask = (matches["valid_match"]
+                 & (matches["cldmask_orac"] == 1)
+                 & (matches["cot_atlid"] > 0)
+                 & (~matches["cot_orac_saturated"])
+                 & matches["cot_atlid"].notna()
+                 & matches["cot_orac"].notna())
+    if args.ice_only and "phase_orac" in matches.columns:
+        n_pre = int(base_mask.sum())
+        base_mask &= matches["phase_orac"] == 2
+        n_post = int(base_mask.sum())
+        print(f"Ice filter: {n_pre} → {n_post} rows (phase_orac == 2)")
+    base_all = matches[base_mask].copy()
     # Headline view drops attenuated (τ lower bounds, not point-comparable
     # to ORAC). Diagnostic panel keeps them so the attenuated class is
     # visible alongside non-attenuated.
@@ -252,6 +406,89 @@ def cmd_figures(args: argparse.Namespace) -> int:
                     title=f"{suptitle} — R by stratum (pixel)",
                     out=out_dir / "cot_r_by_stratum_pixel.png")
     print(f"Wrote 5 PNGs to {out_dir}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# cth-figures
+# ---------------------------------------------------------------------------
+
+def _load_cth_matches(matches_glob: str) -> pd.DataFrame:
+    paths = sorted(glob(matches_glob))
+    if not paths:
+        raise FileNotFoundError(f"No matches CSVs at {matches_glob}")
+    parts = [pd.read_csv(p) for p in paths]
+    df = pd.concat(parts, ignore_index=True)
+    if "sev_scan_time" in df.columns:
+        df["sev_scan_time"] = pd.to_datetime(df["sev_scan_time"], errors="coerce")
+    return df
+
+
+def _cth_base_filter(d: pd.DataFrame) -> pd.Series:
+    return (
+        d["valid_match"]
+        & (d["cldmask_orac"] == 1)
+        & d["cth_atlid_thick_km"].notna()
+        & d["cth_orac_corrected_km"].notna()
+    )
+
+
+def cmd_cth_figures(args: argparse.Namespace) -> int:
+    matches = _load_cth_matches(args.matches)
+    print(f"Loaded {len(matches)} rows")
+
+    base = matches[_cth_base_filter(matches)].copy()
+    qc_mask = CTH_QC_MODES[args.qc_mode](base).fillna(False)
+    headline = base[qc_mask]
+    print(f"Base after qc='{args.qc_mode}': {len(headline)} rows "
+          f"(from {len(base)} cloudy+finite, {len(matches)} raw)")
+
+    sample = dedupe_to_sample(headline)
+    pixel = aggregate_to_pixel_cth(headline)
+    print(f"Sample-level (nearest ATLID per pixel): {len(sample)}  "
+          f"Pixel-aggregate (mean cloudy ATLID): {len(pixel)}")
+
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    suptitle = args.label or f"cth validation ({args.qc_mode})"
+
+    cth_figures.scatter_panel(
+        sample, pixel, suptitle=f"{suptitle} — scatter",
+        out=out_dir / "cth_scatter.png",
+    )
+    cth_figures.diagnostic_panel(
+        sample, suptitle=f"{suptitle} — diagnostic",
+        out=out_dir / "cth_diagnostic.png",
+    )
+
+    sample_stats = stratified_stats(sample, "cth_atlid_thick_km",
+                                    "cth_orac_corrected_km", strata=cth_strata())
+    pixel_stats = stratified_stats(pixel, "cth_atlid_thick_km",
+                                   "cth_orac_corrected_km", strata=cth_strata())
+    cth_figures.bias_by_stratum(
+        sample_stats, metric="bias",
+        title=f"{suptitle} — bias by stratum (sample)",
+        out=out_dir / "cth_bias_by_stratum_sample.png",
+    )
+    cth_figures.bias_by_stratum(
+        pixel_stats, metric="bias",
+        title=f"{suptitle} — bias by stratum (pixel)",
+        out=out_dir / "cth_bias_by_stratum_pixel.png",
+    )
+    cth_figures.bias_by_stratum(
+        pixel_stats, metric="r",
+        title=f"{suptitle} — R by stratum (pixel)",
+        out=out_dir / "cth_r_by_stratum_pixel.png",
+    )
+
+    # QC sensitivity uses cth_report on the full matches table.
+    qc_stats = cth_report(matches)
+    cth_figures.qc_sensitivity_panel(
+        qc_stats,
+        title=f"{suptitle.split(' (')[0]} — QC sensitivity (all-stratum)",
+        out=out_dir / "cth_qc_sensitivity.png",
+    )
+    print(f"Wrote 6 PNGs to {out_dir}")
     return 0
 
 
@@ -329,6 +566,74 @@ def cmd_compare(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# cth-compare (R10 vs R11)
+# ---------------------------------------------------------------------------
+
+def cmd_cth_compare(args: argparse.Namespace) -> int:
+    raw_r10 = _load_cth_matches(args.matches_r10)
+    raw_r11 = _load_cth_matches(args.matches_r11)
+    print(f"R10 raw: {len(raw_r10)}  R11 raw: {len(raw_r11)}")
+
+    qc_fn = CTH_QC_MODES[args.qc_mode]
+    base_r10 = raw_r10[_cth_base_filter(raw_r10) & qc_fn(raw_r10).fillna(False)].copy()
+    base_r11 = raw_r11[_cth_base_filter(raw_r11) & qc_fn(raw_r11).fillna(False)].copy()
+    print(f"R10 after qc='{args.qc_mode}': {len(base_r10)}  "
+          f"R11 after qc='{args.qc_mode}': {len(base_r11)}")
+
+    sample_r10 = dedupe_to_sample(base_r10)
+    sample_r11 = dedupe_to_sample(base_r11)
+    pixel_r10 = aggregate_to_pixel_cth(base_r10)
+    pixel_r11 = aggregate_to_pixel_cth(base_r11)
+
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    suptitle = args.label or f"cth validation R10 vs R11 ({args.qc_mode})"
+
+    cth_figures.scatter_compare(
+        sample_r10, sample_r11,
+        suptitle=f"{suptitle} — sample-level (nearest ATLID)",
+        out=out_dir / "compare_R10_R11_scatter_sample.png",
+    )
+    cth_figures.scatter_compare(
+        pixel_r10, pixel_r11,
+        suptitle=f"{suptitle} — pixel-aggregate (mean cloudy ATLID)",
+        out=out_dir / "compare_R10_R11_scatter_pixel.png",
+    )
+
+    s10 = stratified_stats(sample_r10, "cth_atlid_thick_km",
+                           "cth_orac_corrected_km", strata=cth_strata())
+    s11 = stratified_stats(sample_r11, "cth_atlid_thick_km",
+                           "cth_orac_corrected_km", strata=cth_strata())
+    p10 = stratified_stats(pixel_r10, "cth_atlid_thick_km",
+                           "cth_orac_corrected_km", strata=cth_strata())
+    p11 = stratified_stats(pixel_r11, "cth_atlid_thick_km",
+                           "cth_orac_corrected_km", strata=cth_strata())
+
+    cth_figures.bias_bar_compare(s10, s11, metric="bias",
+        title=f"{suptitle} — R10 vs R11 bias (sample)",
+        out=out_dir / "compare_R10_R11_bias_sample.png")
+    cth_figures.bias_bar_compare(p10, p11, metric="bias",
+        title=f"{suptitle} — R10 vs R11 bias (pixel)",
+        out=out_dir / "compare_R10_R11_bias_pixel.png")
+    cth_figures.bias_bar_compare(p10, p11, metric="r",
+        title=f"{suptitle} — R10 vs R11 R (pixel)",
+        out=out_dir / "compare_R10_R11_r_pixel.png")
+    cth_figures.bias_bar_compare(p10, p11, metric="rmse",
+        title=f"{suptitle} — R10 vs R11 RMSE (pixel)",
+        out=out_dir / "compare_R10_R11_rmse_pixel.png")
+
+    out_stats = pd.concat([
+        s10.assign(view="sample", retrieval="R10"),
+        s11.assign(view="sample", retrieval="R11"),
+        p10.assign(view="pixel",  retrieval="R10"),
+        p11.assign(view="pixel",  retrieval="R11"),
+    ], ignore_index=True).assign(qc_mode=args.qc_mode)
+    out_stats.to_csv(out_dir / "compare_R10_R11_stats.csv", index=False)
+    print(f"Wrote 6 PNGs and stats CSV to {out_dir}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # track-plot
 # ---------------------------------------------------------------------------
 
@@ -376,7 +681,9 @@ def build_parser() -> argparse.ArgumentParser:
     f.add_argument("--matches", required=True, help="Glob over matches CSVs")
     f.add_argument("--out", required=True, help="Output figure directory")
     f.add_argument("--label", default="", help="Title prefix")
-    f.set_defaults(func=cmd_figures)
+    f.add_argument("--all-phases", dest="ice_only", action="store_false",
+                   help="Skip the ice-phase filter (default: ice-only).")
+    f.set_defaults(func=cmd_figures, ice_only=True)
 
     cmp = sub.add_parser("compare", help="R10 vs R11 ORAC retrieval comparison.")
     cmp.add_argument("--matches-r10", required=True, help="Glob over R10 matches CSVs")
@@ -386,6 +693,40 @@ def build_parser() -> argparse.ArgumentParser:
     cmp.add_argument("--all-phases", dest="ice_only", action="store_false",
                      help="Skip the ice-phase filter (default: ice-only).")
     cmp.set_defaults(func=cmd_compare, ice_only=True)
+
+    cc = sub.add_parser("cth-collocate", help="Match A-CTH frames to SEVIRI ORAC (no QC applied).")
+    cc.add_argument("--start", required=True, help="ISO start, e.g. 2026-02-01")
+    cc.add_argument("--end", required=True, help="ISO end (exclusive)")
+    cc.add_argument("--seviri-root", default=str(SEVIRI_ROOT_DEFAULT))
+    cc.add_argument("--retrieval", default=DEFAULT_RETRIEVAL, choices=("R10", "R11"))
+    cc.add_argument("--out", required=True, help="Per-frame matches CSV directory")
+    cc.set_defaults(func=cmd_cth_collocate)
+
+    ce = sub.add_parser("cth-evaluate", help="Concatenate cth matches CSVs + write QC × view × stratum stats.")
+    ce.add_argument("--matches", required=True, help="Glob, e.g. 'validation_data/cth_2026-02_R11/matches_cth_*.csv'")
+    ce.add_argument("--out", required=True, help="Output stats CSV path")
+    ce.add_argument("--write-concat", action="store_true",
+                    help="Also write the concatenated matches CSV alongside.")
+    ce.set_defaults(func=cmd_cth_evaluate)
+
+    cf = sub.add_parser("cth-figures", help="Make cth scatter / diagnostic / bias-by-stratum / QC-sensitivity PNGs.")
+    cf.add_argument("--matches", required=True, help="Glob over cth matches CSVs")
+    cf.add_argument("--out", required=True, help="Output figure directory")
+    cf.add_argument("--qc-mode", default="qc_strict",
+                    choices=tuple(CTH_QC_MODES),
+                    help="QC base filter for scatter / diagnostic / bias-by-stratum panels.")
+    cf.add_argument("--label", default="", help="Title prefix")
+    cf.set_defaults(func=cmd_cth_figures)
+
+    cmpcth = sub.add_parser("cth-compare", help="R10 vs R11 ORAC retrieval comparison for CTH.")
+    cmpcth.add_argument("--matches-r10", required=True, help="Glob over R10 cth matches CSVs")
+    cmpcth.add_argument("--matches-r11", required=True, help="Glob over R11 cth matches CSVs")
+    cmpcth.add_argument("--out", required=True, help="Output figure directory")
+    cmpcth.add_argument("--qc-mode", default="qc_strict",
+                        choices=tuple(CTH_QC_MODES),
+                        help="QC base filter applied to both R10 and R11.")
+    cmpcth.add_argument("--label", default="", help="Title prefix")
+    cmpcth.set_defaults(func=cmd_cth_compare)
 
     t = sub.add_parser("track-plot", help="Per-orbit case-study figure for one frame.")
     t.add_argument("--frame", required=True, help="A-EBD frame ID, e.g. 09737D")

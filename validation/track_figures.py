@@ -17,6 +17,9 @@ import pandas as pd
 from matplotlib.colors import LogNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+
 from orac.io import open_slot
 from orac.metadata import discover_slots
 
@@ -316,9 +319,11 @@ def track_panel_synergy(
 
     # Common helper: attach a same-width colourbar to a panel via
     # make_axes_locatable, so panel widths stay aligned across the column.
+    # Force axes_class=plt.Axes — cartopy GeoAxes default would re-create
+    # a GeoAxes for the colourbar slot, which raises KeyError('projection').
     def _add_cbar(ax, mappable, label: str):
         div = make_axes_locatable(ax)
-        cax = div.append_axes("right", size="2%", pad=0.10)
+        cax = div.append_axes("right", size="2%", pad=0.10, axes_class=plt.Axes)
         cb = fig.colorbar(mappable, cax=cax)
         cb.set_label(label)
         cb.ax.tick_params(direction="in", length=3)
@@ -327,26 +332,40 @@ def track_panel_synergy(
     def _add_cbar_spacer(ax):
         """Reserve the same right-margin width on a non-colourbar panel."""
         div = make_axes_locatable(ax)
-        cax = div.append_axes("right", size="2%", pad=0.10)
+        cax = div.append_axes("right", size="2%", pad=0.10, axes_class=plt.Axes)
         cax.axis("off")
 
     # ── Row 1: SEVIRI cot map + ATLID nadir track coloured by phase ─────
-    ax_map = fig.add_subplot(gs[0])
+    proj = ccrs.PlateCarree()
+    ax_map = fig.add_subplot(gs[0], projection=proj)
+    transform = ccrs.PlateCarree()
     pcm = ax_map.scatter(sl_lon[cloudy], sl_lat[cloudy], c=sl_cot[cloudy],
                          cmap=COT_CMAP, norm=COT_NORM, s=4, marker="s",
-                         linewidths=0, alpha=0.65)
+                         linewidths=0, alpha=0.65, transform=transform)
     _add_cbar(ax_map, pcm, "ORAC cot (cloudy only)")
+    # Coastlines + country borders for geographic context.
+    ax_map.add_feature(cfeature.COASTLINE, lw=0.5, edgecolor="black", zorder=2)
+    ax_map.add_feature(cfeature.BORDERS,   lw=0.4, edgecolor="0.35", zorder=2)
     # Black halo for visibility, then phase-coloured dots on top.
-    ax_map.scatter(lon, lat, c="black", s=18, linewidths=0)
+    ax_map.scatter(lon, lat, c="black", s=18, linewidths=0,
+                   transform=transform, zorder=3)
     for cls, col in _PHASE_COLORS.items():
         m = phase_o == cls
         if m.any():
             ax_map.scatter(lon[m], lat[m], c=col, s=6, linewidths=0,
+                           transform=transform, zorder=4,
                            label=f"{cls} (N={int(m.sum()):,})")
     ax_map.legend(loc="lower left", fontsize=8, framealpha=0.85,
                   markerscale=2)
-    ax_map.set_xlim(lon_min, lon_max); ax_map.set_ylim(lat_min, lat_max)
-    ax_map.set_xlabel("lon [deg]"); ax_map.set_ylabel("lat [deg]")
+    ax_map.set_extent([lon_min, lon_max, lat_min, lat_max], crs=transform)
+    # By default cartopy enforces equal-degree aspect (data:1) which can
+    # squash the map narrower than the curtain/line panels. Force 'auto'
+    # so the map fills the full panel width matching panels 2 and 3.
+    ax_map.set_aspect("auto")
+    gl = ax_map.gridlines(draw_labels=True, alpha=0.3, lw=0.4,
+                          color="0.55", linestyle=":")
+    gl.top_labels = False; gl.right_labels = False
+    gl.xlabel_style = {"size": 8}; gl.ylabel_style = {"size": 8}
     base = fr[fr["valid_match"] & (fr["cldmask_orac"] == 1)
               & fr["cot_water_atlid"].notna() & fr["cot_orac"].notna()].copy()
     if "quality_status_atlid" in base.columns:

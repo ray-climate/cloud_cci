@@ -1,18 +1,17 @@
 """Plotting helpers for cot validation reports.
 
-Three reusable panel makers:
+Same publication-quality conventions as :mod:`validation.cth_figures`,
+adapted for cot's log-distributed nature: 2D-histogram density on
+``imshow`` with ``LogNorm``, log10 axes spanning [0.05, 100], the 1:1
+line drawn above the density layer, and an inset stats text box.
 
-- :func:`scatter_panel` : sample-level + pixel-aggregate hexbin scatters
-  side by side, both on log-log axes (cot range 0.05–100). Reports
-  N, bias, RMSE, R in each title.
-- :func:`diagnostic_panel` : 2×2 scatter coloured by latitude,
-  match distance, time offset, and attenuated flag. Used to
-  diagnose whether the residuals are driven by geometry/QC.
-- :func:`bias_by_stratum` : bar chart of bias per stratum from a
-  :func:`validation.statistics.stratified_stats` table.
+Reusable panels:
 
-All figures use a uniform log-axis convention so they compare directly
-across frames / months.
+- :func:`scatter_panel` : sample + pixel side-by-side density.
+- :func:`diagnostic_panel` : 2×2 scatter coloured by latitude / match
+  distance / time offset / ATLID attenuated flag.
+- :func:`bias_by_stratum` : bar chart of one metric across strata from
+  a :func:`validation.statistics.stratified_stats` table.
 """
 from __future__ import annotations
 
@@ -21,37 +20,119 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.colors import LogNorm
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 LOG_LIM = (-1.5, 2.2)
 LOG_TICKS = (-1, 0, 1, 2)
 LOG_LABELS = ("0.1", "1", "10", "100")
 COT_FLOOR = 0.05  # display floor — ATLID/ORAC values below this are clipped
+DENSITY_BINS = 60
+DENSITY_CMAP = "viridis"
 
 
-def _stats(d: pd.DataFrame, x: str, y: str) -> tuple[int, float, float, float]:
+def _stats(d: pd.DataFrame, x: str, y: str) -> tuple[int, float, float, float, float]:
+    """Return ``(n, bias, rmse, r, r_log)``. ``r_log`` is Pearson R on
+    ``log10(clip(., COT_FLOOR))`` — the metric the cot literature uses
+    because raw-space R is dominated by the heavy upper tail."""
     if len(d) < 2:
-        return len(d), np.nan, np.nan, np.nan
+        return len(d), np.nan, np.nan, np.nan, np.nan
     diff = d[y] - d[x]
+    if d[x].std() > 0 and d[y].std() > 0:
+        r = float(np.corrcoef(d[x], d[y])[0, 1])
+        lx = np.log10(np.clip(d[x].values, COT_FLOOR, None))
+        ly = np.log10(np.clip(d[y].values, COT_FLOOR, None))
+        r_log = float(np.corrcoef(lx, ly)[0, 1]) if lx.std() > 0 and ly.std() > 0 else np.nan
+    else:
+        r = r_log = np.nan
     return (
         len(d),
         float(diff.mean()),
         float(np.sqrt((diff ** 2).mean())),
-        float(np.corrcoef(d[x], d[y])[0, 1]) if d[x].std() > 0 and d[y].std() > 0 else np.nan,
+        r,
+        r_log,
     )
-
-
-def _setup_log_axes(ax) -> None:
-    ax.plot(LOG_LIM, LOG_LIM, "k--", lw=0.8)
-    ax.set_xlim(LOG_LIM); ax.set_ylim(LOG_LIM)
-    ax.set_xticks(LOG_TICKS); ax.set_yticks(LOG_TICKS)
-    ax.set_xticklabels(LOG_LABELS); ax.set_yticklabels(LOG_LABELS)
-    ax.set_aspect("equal")
-    ax.set_xlabel("ATLID column τ₃₅₅")
-    ax.set_ylabel("ORAC SEVIRI cot")
 
 
 def _logclip(s: pd.Series) -> np.ndarray:
     return np.log10(s.clip(lower=COT_FLOOR).values)
+
+
+def _setup_log_axes(ax) -> None:
+    """Set up log10 axes and draw the 1:1 line on top of the data layer.
+
+    Mirrors the cth axes convention: ticks-in on all four sides, the
+    diagonal at zorder 3 so it stays visible across the dense ridge.
+    """
+    ax.set_xlim(LOG_LIM); ax.set_ylim(LOG_LIM)
+    ax.set_xticks(LOG_TICKS); ax.set_yticks(LOG_TICKS)
+    ax.set_xticklabels(LOG_LABELS); ax.set_yticklabels(LOG_LABELS)
+    ax.set_aspect("equal", adjustable="box")
+    ax.tick_params(direction="in", top=True, right=True, length=4)
+    ax.set_xlabel(r"ATLID column $\tau_{355}$")
+    ax.set_ylabel("ORAC SEVIRI cot")
+    ax.plot(LOG_LIM, LOG_LIM, color="0.2", lw=0.9, ls="--", zorder=3)
+
+
+def _density_image(ax, x_log: np.ndarray, y_log: np.ndarray,
+                   lim: tuple[float, float] = LOG_LIM,
+                   bins: int = DENSITY_BINS, cmap: str = DENSITY_CMAP):
+    """2D-histogram density on ``ax`` with ``LogNorm`` colour scale.
+
+    Inputs are already in log10-space so the histogram domain matches
+    the axes set by :func:`_setup_log_axes`. Zero-count cells are masked
+    so the background shows through.
+    """
+    H, xedges, yedges = np.histogram2d(x_log, y_log, bins=bins, range=[lim, lim])
+    H = H.T  # imshow expects (y, x)
+    Hm = np.ma.masked_where(H == 0, H)
+    extent = (xedges[0], xedges[-1], yedges[0], yedges[-1])
+    vmin = 1.0
+    vmax = max(2.0, float(Hm.max())) if Hm.count() else 2.0
+    im = ax.imshow(
+        Hm, origin="lower", extent=extent, cmap=cmap,
+        norm=LogNorm(vmin=vmin, vmax=vmax),
+        interpolation="nearest", aspect="equal", zorder=2,
+    )
+    return im
+
+
+def _attach_colorbar(fig, ax, im, label: str = "count"):
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="4.5%", pad=0.08)
+    cb = fig.colorbar(im, cax=cax)
+    cb.set_label(label)
+    cb.ax.tick_params(direction="in", length=3)
+    return cb
+
+
+def _stat_text(ax, n: int, bias: float, rmse: float, r_log: float, *,
+               loc: tuple[float, float] = (0.04, 0.96)) -> None:
+    """Stats annotation in the upper-left of ``ax``.
+
+    Reports ``R_log`` rather than raw ``R`` — for cot the log-space
+    correlation is the meaningful metric (Karlsson 2013 / PVIR convention).
+    """
+    txt = (
+        f"$N$ = {n:,}\n"
+        f"bias = {bias:+.2f}\n"
+        f"RMSE = {rmse:.2f}\n"
+        f"$R_{{\\mathrm{{log}}}}$ = {r_log:.2f}"
+    )
+    ax.text(
+        loc[0], loc[1], txt, transform=ax.transAxes,
+        ha="left", va="top", fontsize=9,
+        bbox=dict(boxstyle="round,pad=0.32", fc="white",
+                  ec="0.5", lw=0.6, alpha=0.85),
+        zorder=4,
+    )
+
+
+def _save(fig: plt.Figure, out: str | Path | None) -> plt.Figure:
+    if out is not None:
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out, dpi=300, bbox_inches="tight")
+    return fig
 
 
 def scatter_panel(
@@ -62,31 +143,28 @@ def scatter_panel(
     suptitle: str = "",
     out: str | Path | None = None,
 ) -> plt.Figure:
-    """Side-by-side hexbin scatter: sample-level vs pixel-aggregate.
+    """Side-by-side density scatter: sample-level vs pixel-aggregate.
 
-    Both panels show ``log10(y)`` vs ``log10(x)`` over τ ∈ [0.05, 100].
-    Title strip carries N, bias, RMSE, R for each view.
+    Both panels show log10(y) vs log10(x) over τ ∈ [0.05, 100]. The
+    inset reports N, bias, RMSE, R_log.
     """
-    fig, axes = plt.subplots(1, 2, figsize=(13, 6.0))
+    fig, axes = plt.subplots(1, 2, figsize=(11.5, 5.5))
     for ax, d, label in [
-        (axes[0], sample, "sample-level"),
-        (axes[1], pixel, "pixel-aggregate"),
+        (axes[0], sample, "sample-level (nearest ATLID)"),
+        (axes[1], pixel, "pixel-aggregate (mean cloudy ATLID)"),
     ]:
         d2 = d[[x, y]].dropna()
-        n, bias, rmse, r = _stats(d2, x, y)
-        if n >= 2:
-            hb = ax.hexbin(_logclip(d2[x]), _logclip(d2[y]),
-                           gridsize=50, mincnt=1, bins="log", cmap="viridis")
-            fig.colorbar(hb, ax=ax, label="count (log)")
+        n, bias, rmse, _, r_log = _stats(d2, x, y)
         _setup_log_axes(ax)
-        ax.set_title(f"{label}  (N={n})\nbias={bias:+.2f}  RMSE={rmse:.2f}  R={r:.2f}")
+        if n >= 2:
+            im = _density_image(ax, _logclip(d2[x]), _logclip(d2[y]))
+            _attach_colorbar(fig, ax, im, label="count")
+        _stat_text(ax, n, bias, rmse, r_log)
+        ax.set_title(label, pad=6)
     if suptitle:
-        fig.suptitle(suptitle, fontsize=12)
+        fig.suptitle(suptitle, fontsize=11, y=1.02)
     fig.tight_layout()
-    if out is not None:
-        Path(out).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(out, dpi=150)
-    return fig
+    return _save(fig, out)
 
 
 def diagnostic_panel(
@@ -96,52 +174,50 @@ def diagnostic_panel(
     suptitle: str = "",
     out: str | Path | None = None,
 ) -> plt.Figure:
-    """2×2 scatter coloured by lat / dist / time-diff / attenuated flag.
-
-    Used to diagnose where the residuals come from. ``sample`` is the
-    sample-level DataFrame after the standard base filter
-    (cloudy + ATLID > 0 + not saturated).
-    """
+    """2×2 scatter coloured by lat / dist / time-diff / attenuated flag."""
     fig, axes = plt.subplots(2, 2, figsize=(12, 11))
     d = sample[[x, y, "ec_lat", "distance_km", "time_diff_s", "attenuated"]].dropna(
         subset=[x, y]
     )
     xv = _logclip(d[x]); yv = _logclip(d[y])
 
-    sc = axes[0, 0].scatter(xv, yv, c=d["ec_lat"], cmap="viridis",
-                            s=4, alpha=0.6, vmin=20, vmax=70)
-    fig.colorbar(sc, ax=axes[0, 0], label="latitude [deg]")
-    axes[0, 0].set_title("(a) coloured by latitude")
+    panels = [
+        (axes[0, 0], d["ec_lat"].values,        "viridis", 20, 70,
+         "latitude [deg]",          "(a) latitude"),
+        (axes[0, 1], d["distance_km"].values,   "plasma",   0,  6,
+         "match distance [km]",     "(b) match distance"),
+        (axes[1, 0], d["time_diff_s"].values,   "cividis",  0, 450,
+         r"$|\Delta t|$ [s]",       "(c) time offset"),
+    ]
+    for ax, c, cmap, vmin, vmax, cb_label, title in panels:
+        _setup_log_axes(ax)
+        sc = ax.scatter(xv, yv, c=c, cmap=cmap, s=3, alpha=0.55,
+                        vmin=vmin, vmax=vmax, zorder=2,
+                        edgecolors="none", rasterized=True)
+        _attach_colorbar(fig, ax, sc, label=cb_label)
+        ax.set_title(title, pad=6)
 
-    sc = axes[0, 1].scatter(xv, yv, c=d["distance_km"], cmap="plasma",
-                            s=4, alpha=0.6, vmin=0, vmax=6)
-    fig.colorbar(sc, ax=axes[0, 1], label="dist to SEVIRI pixel [km]")
-    axes[0, 1].set_title("(b) coloured by match distance")
-
-    sc = axes[1, 0].scatter(xv, yv, c=d["time_diff_s"], cmap="cividis",
-                            s=4, alpha=0.6, vmin=0, vmax=450)
-    fig.colorbar(sc, ax=axes[1, 0], label="|Δt| [s]")
-    axes[1, 0].set_title("(c) coloured by time offset")
-
+    ax = axes[1, 1]
+    _setup_log_axes(ax)
     not_att = d[~d["attenuated"]]
     att = d[d["attenuated"]]
-    axes[1, 1].scatter(_logclip(not_att[x]), _logclip(not_att[y]),
-                       c="0.7", s=4, alpha=0.5, label=f"normal (N={len(not_att)})")
-    axes[1, 1].scatter(_logclip(att[x]), _logclip(att[y]),
-                       c="tab:red", s=8, alpha=0.7,
-                       label=f"attenuated (N={len(att)})")
-    axes[1, 1].legend(loc="lower right", fontsize=9)
-    axes[1, 1].set_title("(d) attenuated profiles (τ is lower bound)")
+    ax.scatter(_logclip(not_att[x]), _logclip(not_att[y]),
+               c="0.7", s=3, alpha=0.5, edgecolors="none",
+               label=f"normal ($N$={len(not_att):,})", zorder=2, rasterized=True)
+    ax.scatter(_logclip(att[x]), _logclip(att[y]),
+               c="tab:red", s=6, alpha=0.7, edgecolors="none",
+               label=f"attenuated ($N$={len(att):,})", zorder=2, rasterized=True)
+    ax.legend(loc="lower right", fontsize=8, frameon=True, framealpha=0.9)
+    ax.set_title("(d) attenuated profiles ($\\tau$ is lower bound)", pad=6)
+    # Reserve right margin so this panel aligns with the colourbarred ones.
+    divider = make_axes_locatable(ax)
+    spacer = divider.append_axes("right", size="4.5%", pad=0.08)
+    spacer.axis("off")
 
-    for ax in axes.flat:
-        _setup_log_axes(ax)
     if suptitle:
-        fig.suptitle(suptitle, fontsize=12)
+        fig.suptitle(suptitle, fontsize=11, y=1.0)
     fig.tight_layout()
-    if out is not None:
-        Path(out).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(out, dpi=150)
-    return fig
+    return _save(fig, out)
 
 
 def bias_by_stratum(
@@ -151,11 +227,7 @@ def bias_by_stratum(
     title: str = "Bias by stratum",
     out: str | Path | None = None,
 ) -> plt.Figure:
-    """Bar chart of one metric across strata, labelling N per bar.
-
-    ``stats`` is a table from :func:`validation.statistics.stratified_stats`;
-    ``metric`` is one of ``bias / rmse / mae / r``.
-    """
+    """Bar chart of one metric across strata, labelling N per bar."""
     d = stats.dropna(subset=[metric]).copy()
     d = d[d["stratum"] != "all"].reset_index(drop=True)
 
@@ -169,7 +241,6 @@ def bias_by_stratum(
     for tick in ax.get_xticklabels():
         tick.set_horizontalalignment("right")
 
-    # N labels above bars
     ymax = d[metric].abs().max() * 1.15
     for i, (val, n) in enumerate(zip(d[metric].values, d["n"].values)):
         offset = (0.02 * ymax) if val >= 0 else (-0.04 * ymax)

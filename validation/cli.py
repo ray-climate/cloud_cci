@@ -25,19 +25,24 @@ import pandas as pd
 
 from .collocate import match_track_to_seviri, open_seviri_at_matches
 from .figures import bias_by_stratum, diagnostic_panel, scatter_panel
-from .readers import read_aebd_track, read_acth_track
-from .reference import cot_from_aebd, cth_from_acth
-from .compare_figures import bias_bar_compare, scatter_compare
-from . import cth_figures
+from .readers import read_aebd_track, read_accap_track, read_acth_track
+from .reference import cot_cer_water_from_accap, cot_from_aebd, cth_from_acth
+from .compare_figures import (
+    bias_bar_compare, scatter_compare, scatter_compare_by_surface,
+)
+from . import cth_figures, water_cloud_figures
 from .statistics import (
-    CTH_QC_MODES, aggregate_to_pixel, aggregate_to_pixel_cth, cot_report,
-    cth_report, cth_strata, dedupe_to_sample, stratified_stats,
+    CTH_QC_MODES, SYNERGY_QC_MODES, aggregate_to_pixel, aggregate_to_pixel_cth,
+    aggregate_to_pixel_water, cer_water_report, cer_water_strata,
+    cot_report, cot_water_report, cot_water_strata, cth_report, cth_strata,
+    dedupe_to_sample, dedupe_to_sample_water, stratified_stats,
 )
 from .track_figures import track_panel
 
 DEFAULT_DRIVER_DIR = {
     "A-EBD": "ATL_EBD_2A",
     "A-CTH": "ATL_CTH_2A",
+    "ACM-CAP": "ACM_CAP_2B",
 }
 
 ORAC_COT_SATURATION = 100.0
@@ -275,6 +280,119 @@ def cmd_cth_collocate(args: argparse.Namespace) -> int:
         meta = _frame_metadata(path)
         fid = meta[0] if meta else "?"
         out_path, status = _process_frame_cth(
+            path, Path(args.seviri_root), args.retrieval, out_dir
+        )
+        counts[status] += 1
+        marker = {"done": "✓", "skip": "·", "empty": "○", "fail": "✗"}[status]
+        print(f"  [{i:4d}/{len(frames)}] {marker} {fid:>8} → {status}")
+    print(f"Summary: {counts}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# synergy-collocate (ACM-CAP driver — produces both COT and CER references)
+# ---------------------------------------------------------------------------
+
+# ORAC vars sampled at each matched SEVIRI pixel for the synergy validation.
+# cot+cer+phase+cldmask+lsflag are needed for both cot-water and cer-water reports.
+_SYNERGY_ORAC_VARS = ("cot", "cer", "cldmask", "lsflag", "phase")
+
+
+def _process_frame_synergy(
+    path: Path, seviri_root: Path, retrieval: str, out_dir: Path
+) -> tuple[Path | None, str]:
+    """Match one ACM-CAP frame and write matches_synergy_<frame_id>.csv.
+
+    No QC is applied at this stage — the CSV carries the raw ACM-CAP
+    quality fields (quality_status, convergence_status, synergy_status,
+    cost_function, atlid_assim_status, cpr_assim_status) so QC choices
+    are made as strata at evaluate time. Both cot_water and cer_water
+    reference values are computed from the same per-bin arrays.
+    """
+    frame_id = _frame_metadata(path)
+    if frame_id is None:
+        return None, "fail"
+    fid = frame_id[0]
+    out_csv = out_dir / f"matches_synergy_{fid}.csv"
+    if out_csv.exists() and out_csv.stat().st_size > 0:
+        return out_csv, "skip"
+
+    try:
+        track = read_accap_track(path)
+    except Exception as e:  # noqa: BLE001
+        print(f"  [{fid}] read failed: {e}", file=sys.stderr)
+        return None, "fail"
+
+    cot_w, cer_w, liq_only = cot_cer_water_from_accap(
+        track["liquid_optical_depth"], track["liquid_extinction"],
+        track["liquid_eff_radius"], track["liquid_classification"],
+        track["ice_water_content"], track["height"],
+    )
+
+    try:
+        matches = match_track_to_seviri(
+            track["lat"], track["lon"], track["time"],
+            seviri_root, retrieval=retrieval,
+        )
+    except RuntimeError as e:
+        print(f"  [{fid}] no SEVIRI slots: {e}", file=sys.stderr)
+        return None, "empty"
+    except Exception as e:  # noqa: BLE001
+        print(f"  [{fid}] match failed ({type(e).__name__}): {e}", file=sys.stderr)
+        return None, "fail"
+
+    matches["cot_water_atlid"] = cot_w
+    matches["cer_water_atlid"] = cer_w
+    matches["liquid_only_atlid"] = liq_only
+    matches["quality_status_atlid"] = track["quality_status"]
+    matches["convergence_status_atlid"] = track["convergence_status"]
+    matches["synergy_status_atlid"] = track["synergy_status"]
+    matches["cost_function_atlid"] = track["cost_function"]
+    matches["atlid_assim_status"] = track["atlid_assim_status"]
+    matches["cpr_assim_status"] = track["cpr_assim_status"]
+    matches["frame_id"] = fid
+
+    if not matches["valid_match"].any():
+        return None, "empty"
+
+    try:
+        matches = open_seviri_at_matches(
+            matches, seviri_root, retrieval, _SYNERGY_ORAC_VARS
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"  [{fid}] ORAC sample failed ({type(e).__name__}): {e}", file=sys.stderr)
+        return None, "fail"
+    matches = matches.rename(columns={
+        "cot": "cot_orac", "cer": "cer_orac",
+        "cldmask": "cldmask_orac", "lsflag": "lsflag_orac",
+        "phase": "phase_orac",
+    })
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    matches.to_csv(out_csv, index=False)
+    return out_csv, "done"
+
+
+def cmd_synergy_collocate(args: argparse.Namespace) -> int:
+    start = datetime.fromisoformat(args.start.replace("Z", "+00:00"))
+    end = datetime.fromisoformat(args.end.replace("Z", "+00:00"))
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+
+    frames = _enumerate_frames("ACM-CAP", start, end)
+    print(f"Found {len(frames)} ACM-CAP frames in [{start}, {end})")
+    if not frames:
+        return 0
+
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    counts = {"done": 0, "skip": 0, "empty": 0, "fail": 0}
+    for i, path in enumerate(frames, 1):
+        meta = _frame_metadata(path)
+        fid = meta[0] if meta else "?"
+        out_path, status = _process_frame_synergy(
             path, Path(args.seviri_root), args.retrieval, out_dir
         )
         counts[status] += 1
@@ -528,12 +646,18 @@ def cmd_compare(args: argparse.Namespace) -> int:
     scatter_compare(base_r10, base_r11,
                     suptitle=f"{suptitle} — R10 vs R11 (sample-level)",
                     out=out_dir / "compare_R10_R11_scatter_sample.png")
+    scatter_compare_by_surface(base_r10, base_r11,
+                               suptitle=f"{suptitle} — R10 vs R11 by surface (sample-level)",
+                               out=out_dir / "compare_R10_R11_scatter_sample_by_surface.png")
 
     pix_r10 = aggregate_to_pixel(base_r10, "cot_atlid", "cot_orac")
     pix_r11 = aggregate_to_pixel(base_r11, "cot_atlid", "cot_orac")
     scatter_compare(pix_r10, pix_r11,
                     suptitle=f"{suptitle} — R10 vs R11 (pixel-aggregate)",
                     out=out_dir / "compare_R10_R11_scatter_pixel.png")
+    scatter_compare_by_surface(pix_r10, pix_r11,
+                               suptitle=f"{suptitle} — R10 vs R11 by surface (pixel-aggregate)",
+                               out=out_dir / "compare_R10_R11_scatter_pixel_by_surface.png")
 
     s10 = stratified_stats(base_r10, "cot_atlid", "cot_orac")
     s11 = stratified_stats(base_r11, "cot_atlid", "cot_orac")
@@ -561,7 +685,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
         p11.assign(view="pixel",  retrieval="R11"),
     ], ignore_index=True)
     out_stats.to_csv(out_dir / "compare_R10_R11_stats.csv", index=False)
-    print(f"Wrote 6 PNGs and stats CSV to {out_dir}")
+    print(f"Wrote 8 PNGs and stats CSV to {out_dir}")
     return 0
 
 
@@ -641,6 +765,189 @@ def cmd_cth_compare(args: argparse.Namespace) -> int:
     out_stats.to_csv(out_dir / "compare_R10_R11_stats.csv", index=False)
     print(f"Wrote 6 PNGs and stats CSV to {out_dir}")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# water-cloud (cot_water, cer_water) evaluate / figures / compare
+# ---------------------------------------------------------------------------
+
+def _load_synergy_matches(matches_glob: str) -> pd.DataFrame:
+    paths = sorted(glob(matches_glob))
+    if not paths:
+        raise FileNotFoundError(f"No matches CSVs at {matches_glob}")
+    parts = [pd.read_csv(p) for p in paths]
+    df = pd.concat(parts, ignore_index=True)
+    if "sev_scan_time" in df.columns:
+        df["sev_scan_time"] = pd.to_datetime(df["sev_scan_time"], errors="coerce")
+    return df
+
+
+def _water_base_filter(d: pd.DataFrame, var_atlid: str, var_orac: str) -> pd.Series:
+    return (
+        d["valid_match"]
+        & (d["cldmask_orac"] == 1)
+        & d[var_atlid].notna()
+        & d[var_orac].notna()
+    )
+
+
+def _cmd_water_evaluate(args, *, var_atlid, var_orac, report_fn) -> int:
+    matches = _load_synergy_matches(args.matches)
+    print(f"Concatenated {len(matches)} rows")
+    out = report_fn(matches)
+    out_csv = Path(args.out)
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    out.to_csv(out_csv, index=False)
+    print(f"Wrote {out_csv} ({len(out)} rows; "
+          f"qc_modes={sorted(out['qc_mode'].unique())}, "
+          f"views={sorted(out['view'].unique())})")
+    if args.write_concat:
+        concat_path = out_csv.with_suffix(".matches.csv")
+        matches.to_csv(concat_path, index=False)
+        print(f"Wrote concatenated matches to {concat_path}")
+    return 0
+
+
+def cmd_cot_water_evaluate(args: argparse.Namespace) -> int:
+    return _cmd_water_evaluate(args, var_atlid="cot_water_atlid",
+                                var_orac="cot_orac", report_fn=cot_water_report)
+
+
+def cmd_cer_water_evaluate(args: argparse.Namespace) -> int:
+    return _cmd_water_evaluate(args, var_atlid="cer_water_atlid",
+                                var_orac="cer_orac", report_fn=cer_water_report)
+
+
+def _cmd_water_figures(args, *, mode, var_atlid, var_orac, strata_fn, report_fn,
+                        prefix: str) -> int:
+    matches = _load_synergy_matches(args.matches)
+    print(f"Loaded {len(matches)} rows")
+    base = matches[_water_base_filter(matches, var_atlid, var_orac)].copy()
+    qc_mask = SYNERGY_QC_MODES[args.qc_mode](base).fillna(False)
+    headline = base[qc_mask]
+    print(f"Base after qc='{args.qc_mode}': {len(headline)} rows "
+          f"(from {len(base)} cloudy+finite, {len(matches)} raw)")
+    sample = dedupe_to_sample_water(headline)
+    pixel = aggregate_to_pixel_water(headline, var_atlid, var_orac)
+    print(f"Sample-level: {len(sample)}  Pixel-aggregate: {len(pixel)}")
+
+    out_dir = Path(args.out); out_dir.mkdir(parents=True, exist_ok=True)
+    suptitle = args.label or f"{prefix} validation ({args.qc_mode})"
+
+    water_cloud_figures.scatter_panel(
+        sample, pixel, mode=mode, x=var_atlid, y=var_orac,
+        suptitle=f"{suptitle} — scatter",
+        out=out_dir / f"{prefix}_scatter.png",
+    )
+
+    sample_stats = stratified_stats(sample, var_atlid, var_orac, strata=strata_fn())
+    pixel_stats = stratified_stats(pixel, var_atlid, var_orac, strata=strata_fn())
+    water_cloud_figures.bias_by_stratum(
+        sample_stats, metric="bias",
+        title=f"{suptitle} — bias by stratum (sample)",
+        out=out_dir / f"{prefix}_bias_by_stratum_sample.png")
+    water_cloud_figures.bias_by_stratum(
+        pixel_stats, metric="bias",
+        title=f"{suptitle} — bias by stratum (pixel)",
+        out=out_dir / f"{prefix}_bias_by_stratum_pixel.png")
+    water_cloud_figures.bias_by_stratum(
+        pixel_stats, metric="r",
+        title=f"{suptitle} — R by stratum (pixel)",
+        out=out_dir / f"{prefix}_r_by_stratum_pixel.png")
+
+    qc_stats = report_fn(matches)
+    water_cloud_figures.qc_sensitivity_panel(
+        qc_stats, title=f"{suptitle.split(' (')[0]} — QC sensitivity",
+        out=out_dir / f"{prefix}_qc_sensitivity.png")
+    print(f"Wrote 5 PNGs to {out_dir}")
+    return 0
+
+
+def cmd_cot_water_figures(args: argparse.Namespace) -> int:
+    return _cmd_water_figures(args, mode="cot",
+                               var_atlid="cot_water_atlid", var_orac="cot_orac",
+                               strata_fn=cot_water_strata, report_fn=cot_water_report,
+                               prefix="cot_water")
+
+
+def cmd_cer_water_figures(args: argparse.Namespace) -> int:
+    return _cmd_water_figures(args, mode="cer",
+                               var_atlid="cer_water_atlid", var_orac="cer_orac",
+                               strata_fn=cer_water_strata, report_fn=cer_water_report,
+                               prefix="cer_water")
+
+
+def _cmd_water_compare(args, *, mode, var_atlid, var_orac, strata_fn, prefix) -> int:
+    raw_r10 = _load_synergy_matches(args.matches_r10)
+    raw_r11 = _load_synergy_matches(args.matches_r11)
+    print(f"R10 raw: {len(raw_r10)}  R11 raw: {len(raw_r11)}")
+    qc_fn = SYNERGY_QC_MODES[args.qc_mode]
+    base_r10 = raw_r10[_water_base_filter(raw_r10, var_atlid, var_orac)
+                       & qc_fn(raw_r10).fillna(False)].copy()
+    base_r11 = raw_r11[_water_base_filter(raw_r11, var_atlid, var_orac)
+                       & qc_fn(raw_r11).fillna(False)].copy()
+    print(f"R10 after qc='{args.qc_mode}': {len(base_r10)}  R11: {len(base_r11)}")
+
+    sample_r10 = dedupe_to_sample_water(base_r10)
+    sample_r11 = dedupe_to_sample_water(base_r11)
+    pixel_r10 = aggregate_to_pixel_water(base_r10, var_atlid, var_orac)
+    pixel_r11 = aggregate_to_pixel_water(base_r11, var_atlid, var_orac)
+
+    out_dir = Path(args.out); out_dir.mkdir(parents=True, exist_ok=True)
+    suptitle = args.label or f"{prefix} validation R10 vs R11 ({args.qc_mode})"
+
+    water_cloud_figures.scatter_compare(
+        sample_r10, sample_r11, mode=mode, x=var_atlid, y=var_orac,
+        suptitle=f"{suptitle} — sample-level (nearest ATLID)",
+        out=out_dir / f"compare_R10_R11_scatter_sample.png")
+    water_cloud_figures.scatter_compare(
+        pixel_r10, pixel_r11, mode=mode, x=var_atlid, y=var_orac,
+        suptitle=f"{suptitle} — pixel-aggregate (mean cloudy ATLID)",
+        out=out_dir / f"compare_R10_R11_scatter_pixel.png")
+    water_cloud_figures.scatter_compare_by_surface(
+        sample_r10, sample_r11, mode=mode, x=var_atlid, y=var_orac,
+        suptitle=f"{suptitle} — sample-level by surface",
+        out=out_dir / f"compare_R10_R11_scatter_sample_by_surface.png")
+    water_cloud_figures.scatter_compare_by_surface(
+        pixel_r10, pixel_r11, mode=mode, x=var_atlid, y=var_orac,
+        suptitle=f"{suptitle} — pixel-aggregate by surface",
+        out=out_dir / f"compare_R10_R11_scatter_pixel_by_surface.png")
+
+    s10 = stratified_stats(sample_r10, var_atlid, var_orac, strata=strata_fn())
+    s11 = stratified_stats(sample_r11, var_atlid, var_orac, strata=strata_fn())
+    p10 = stratified_stats(pixel_r10, var_atlid, var_orac, strata=strata_fn())
+    p11 = stratified_stats(pixel_r11, var_atlid, var_orac, strata=strata_fn())
+    for name, a, b, view in [("bias_sample", s10, s11, "sample"),
+                              ("bias_pixel",  p10, p11, "pixel"),
+                              ("r_pixel",     p10, p11, "pixel"),
+                              ("rmse_pixel",  p10, p11, "pixel")]:
+        metric = name.split("_")[0]
+        water_cloud_figures.bias_bar_compare(
+            a, b, metric=metric,
+            title=f"{suptitle} — {metric} ({view})",
+            out=out_dir / f"compare_R10_R11_{name}.png")
+
+    out_stats = pd.concat([
+        s10.assign(view="sample", retrieval="R10"),
+        s11.assign(view="sample", retrieval="R11"),
+        p10.assign(view="pixel",  retrieval="R10"),
+        p11.assign(view="pixel",  retrieval="R11"),
+    ], ignore_index=True).assign(qc_mode=args.qc_mode)
+    out_stats.to_csv(out_dir / "compare_R10_R11_stats.csv", index=False)
+    print(f"Wrote 8 PNGs and stats CSV to {out_dir}")
+    return 0
+
+
+def cmd_cot_water_compare(args: argparse.Namespace) -> int:
+    return _cmd_water_compare(args, mode="cot",
+                               var_atlid="cot_water_atlid", var_orac="cot_orac",
+                               strata_fn=cot_water_strata, prefix="cot_water")
+
+
+def cmd_cer_water_compare(args: argparse.Namespace) -> int:
+    return _cmd_water_compare(args, mode="cer",
+                               var_atlid="cer_water_atlid", var_orac="cer_orac",
+                               strata_fn=cer_water_strata, prefix="cer_water")
 
 
 # ---------------------------------------------------------------------------
@@ -727,6 +1034,47 @@ def build_parser() -> argparse.ArgumentParser:
                     help="QC base filter for scatter / diagnostic / bias-by-stratum panels.")
     cf.add_argument("--label", default="", help="Title prefix")
     cf.set_defaults(func=cmd_cth_figures)
+
+    sc = sub.add_parser("synergy-collocate",
+                        help="Match ACM-CAP frames to SEVIRI ORAC (no QC; both cot+cer references).")
+    sc.add_argument("--start", required=True, help="ISO start, e.g. 2026-02-01")
+    sc.add_argument("--end", required=True, help="ISO end (exclusive)")
+    sc.add_argument("--seviri-root", default=str(SEVIRI_ROOT_DEFAULT))
+    sc.add_argument("--retrieval", default=DEFAULT_RETRIEVAL, choices=("R10", "R11"))
+    sc.add_argument("--out", required=True, help="Per-frame matches CSV directory")
+    sc.set_defaults(func=cmd_synergy_collocate)
+
+    for var, ev_fn, fig_fn, cmp_fn in (
+        ("cot-water", cmd_cot_water_evaluate, cmd_cot_water_figures, cmd_cot_water_compare),
+        ("cer-water", cmd_cer_water_evaluate, cmd_cer_water_figures, cmd_cer_water_compare),
+    ):
+        ev = sub.add_parser(f"{var}-evaluate",
+                            help=f"Concatenate synergy matches CSVs + write {var} stats.")
+        ev.add_argument("--matches", required=True, help="Glob over synergy matches CSVs")
+        ev.add_argument("--out", required=True, help="Output stats CSV path")
+        ev.add_argument("--write-concat", action="store_true",
+                        help="Also write concatenated matches CSV alongside.")
+        ev.set_defaults(func=ev_fn)
+
+        fg = sub.add_parser(f"{var}-figures", help=f"Make {var} figures.")
+        fg.add_argument("--matches", required=True, help="Glob over synergy matches CSVs")
+        fg.add_argument("--out", required=True, help="Output figure directory")
+        fg.add_argument("--qc-mode", default="qc_strict",
+                        choices=tuple(SYNERGY_QC_MODES),
+                        help="QC base filter for the headline panels.")
+        fg.add_argument("--label", default="", help="Title prefix")
+        fg.set_defaults(func=fig_fn)
+
+        cmp = sub.add_parser(f"{var}-compare",
+                             help=f"R10 vs R11 ORAC retrieval comparison for {var}.")
+        cmp.add_argument("--matches-r10", required=True, help="Glob over R10 synergy matches CSVs")
+        cmp.add_argument("--matches-r11", required=True, help="Glob over R11 synergy matches CSVs")
+        cmp.add_argument("--out", required=True, help="Output figure directory")
+        cmp.add_argument("--qc-mode", default="qc_strict",
+                         choices=tuple(SYNERGY_QC_MODES),
+                         help="QC base filter applied to both R10 and R11.")
+        cmp.add_argument("--label", default="", help="Title prefix")
+        cmp.set_defaults(func=cmp_fn)
 
     cmpcth = sub.add_parser("cth-compare", help="R10 vs R11 ORAC retrieval comparison for CTH.")
     cmpcth.add_argument("--matches-r10", required=True, help="Glob over R10 cth matches CSVs")

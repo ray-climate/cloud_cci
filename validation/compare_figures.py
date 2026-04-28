@@ -1,18 +1,13 @@
 """R10 vs R11 ORAC retrieval comparison against the same ATLID reference.
 
-Two figures:
+Same publication-quality density-scatter style as
+:mod:`validation.cth_figures`, adapted for cot's log10 axes.
 
-- :func:`scatter_compare` : sample-level hexbin scatter of ORAC cot vs
-  ATLID column τ for R10 and R11 side by side. Reports N, bias, RMSE,
-  R_log per panel.
-- :func:`bias_bar_compare` : bias-by-stratum dual bar chart with R10
-  and R11 plotted next to each other for every stratum. Used to see
-  per-regime improvement of R11 over R10.
+Panels:
 
-The two input DataFrames must come from collocation runs that share
-the same ATLID frame set (which they do for a given month) — the join
-is along the ``frame_id`` × pixel match, so the comparison is
-apples-to-apples.
+- :func:`scatter_compare`            : 1×2 R10 vs R11 density.
+- :func:`scatter_compare_by_surface` : 2×2 R10/R11 × ocean/land density.
+- :func:`bias_bar_compare`           : R10 vs R11 dual-bar chart.
 """
 from __future__ import annotations
 
@@ -22,27 +17,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from .figures import COT_FLOOR, LOG_LABELS, LOG_LIM, LOG_TICKS, _logclip, _stats
-
-
-def _setup_log_axes(ax) -> None:
-    ax.plot(LOG_LIM, LOG_LIM, "k--", lw=0.8)
-    ax.set_xlim(LOG_LIM); ax.set_ylim(LOG_LIM)
-    ax.set_xticks(LOG_TICKS); ax.set_yticks(LOG_TICKS)
-    ax.set_xticklabels(LOG_LABELS); ax.set_yticklabels(LOG_LABELS)
-    ax.set_aspect("equal")
-    ax.set_xlabel("ATLID column τ₃₅₅")
-    ax.set_ylabel("ORAC SEVIRI cot")
-
-
-def _r_log(d: pd.DataFrame, x: str, y: str) -> float:
-    if len(d) < 2:
-        return np.nan
-    lx = np.log10(np.clip(d[x].values, COT_FLOOR, None))
-    ly = np.log10(np.clip(d[y].values, COT_FLOOR, None))
-    if lx.std() == 0 or ly.std() == 0:
-        return np.nan
-    return float(np.corrcoef(lx, ly)[0, 1])
+from .figures import (
+    LOG_LIM,
+    _attach_colorbar,
+    _density_image,
+    _logclip,
+    _save,
+    _setup_log_axes,
+    _stat_text,
+    _stats,
+)
 
 
 def scatter_compare(
@@ -53,28 +37,61 @@ def scatter_compare(
     suptitle: str = "",
     out: str | Path | None = None,
 ) -> plt.Figure:
-    """1×2 hexbin scatter: R10 left, R11 right. R_log shown in title."""
-    fig, axes = plt.subplots(1, 2, figsize=(13, 6.0))
-    for ax, d, label in [
-        (axes[0], d_r10, "R10"),
-        (axes[1], d_r11, "R11"),
-    ]:
+    """1×2 density scatter, R10 left vs R11 right."""
+    fig, axes = plt.subplots(1, 2, figsize=(11.5, 5.5))
+    for ax, d, label in [(axes[0], d_r10, "R10"), (axes[1], d_r11, "R11")]:
         d2 = d[[x, y]].dropna()
-        n, bias, rmse, _ = _stats(d2, x, y)
-        rlog = _r_log(d2, x, y)
-        if n >= 2:
-            hb = ax.hexbin(_logclip(d2[x]), _logclip(d2[y]),
-                           gridsize=50, mincnt=1, bins="log", cmap="viridis")
-            fig.colorbar(hb, ax=ax, label="count (log)")
+        n, bias, rmse, _, r_log = _stats(d2, x, y)
         _setup_log_axes(ax)
-        ax.set_title(f"{label}  (N={n})\nbias={bias:+.2f}  RMSE={rmse:.2f}  R_log={rlog:.2f}")
+        if n >= 2:
+            im = _density_image(ax, _logclip(d2[x]), _logclip(d2[y]))
+            _attach_colorbar(fig, ax, im, label="count")
+        _stat_text(ax, n, bias, rmse, r_log)
+        ax.set_title(label, pad=6)
     if suptitle:
-        fig.suptitle(suptitle, fontsize=12)
+        fig.suptitle(suptitle, fontsize=11, y=1.02)
     fig.tight_layout()
-    if out is not None:
-        Path(out).parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(out, dpi=150)
-    return fig
+    return _save(fig, out)
+
+
+def scatter_compare_by_surface(
+    d_r10: pd.DataFrame,
+    d_r11: pd.DataFrame,
+    x: str = "cot_atlid",
+    y: str = "cot_orac",
+    lsflag_col: str = "lsflag_orac",
+    suptitle: str = "",
+    out: str | Path | None = None,
+) -> plt.Figure:
+    """2×2 density scatter — rows: ocean / land, cols: R10 / R11.
+
+    The land/ocean split uses ORAC ``lsflag_orac`` (0 = sea, 1 = land).
+    Each panel reports its own N, bias, RMSE, R_log.
+    """
+    fig, axes = plt.subplots(2, 2, figsize=(11.5, 10.5))
+    surfaces = (
+        ("Ocean", lambda d: d[lsflag_col] < 0.5),
+        ("Land",  lambda d: d[lsflag_col] >= 0.5),
+    )
+    retrievals = (("R10", d_r10), ("R11", d_r11))
+    for i, (s_name, mask_fn) in enumerate(surfaces):
+        for j, (r_name, d) in enumerate(retrievals):
+            ax = axes[i, j]
+            if lsflag_col in d.columns:
+                d2 = d.loc[mask_fn(d).fillna(False), [x, y]].dropna()
+            else:
+                d2 = d.iloc[0:0][[x, y]]
+            n, bias, rmse, _, r_log = _stats(d2, x, y)
+            _setup_log_axes(ax)
+            if n >= 2:
+                im = _density_image(ax, _logclip(d2[x]), _logclip(d2[y]))
+                _attach_colorbar(fig, ax, im, label="count")
+            _stat_text(ax, n, bias, rmse, r_log)
+            ax.set_title(f"{r_name} — {s_name}", pad=6)
+    if suptitle:
+        fig.suptitle(suptitle, fontsize=11, y=1.0)
+    fig.tight_layout()
+    return _save(fig, out)
 
 
 def bias_bar_compare(
@@ -85,11 +102,7 @@ def bias_bar_compare(
     title: str = "R10 vs R11 — bias by stratum",
     out: str | Path | None = None,
 ) -> plt.Figure:
-    """Dual-bar chart of one metric across strata, R10 vs R11.
-
-    Each stratum gets two adjacent bars. ``stats_*`` are tables from
-    :func:`validation.statistics.stratified_stats`.
-    """
+    """Dual-bar chart of one metric across strata, R10 vs R11."""
     s10 = stats_r10.set_index("stratum")
     s11 = stats_r11.set_index("stratum")
     common = [s for s in s11.index if s in s10.index and s != "all"]
@@ -110,7 +123,7 @@ def bias_bar_compare(
     ax.set_xticks(x); ax.set_xticklabels(common, rotation=35, ha="right")
     ax.set_ylabel(metric)
     ax.set_title(title)
-    ax.legend(loc="upper right", fontsize=9)
+    ax.legend(loc="best", fontsize=9)
 
     yspan = max(np.nanmax(np.abs(np.r_[v10, v11])) * 1.18, 1e-3)
     for i, (a, b, na, nb) in enumerate(zip(v10, v11, n10, n11)):

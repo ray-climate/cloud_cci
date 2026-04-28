@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.colors import LogNorm
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from orac.io import open_slot
 from orac.metadata import discover_slots
@@ -313,12 +314,28 @@ def track_panel_synergy(
     fig = plt.figure(figsize=(12, 13))
     gs = fig.add_gridspec(3, 1, height_ratios=(1.4, 1.0, 0.95), hspace=0.35)
 
+    # Common helper: attach a same-width colourbar to a panel via
+    # make_axes_locatable, so panel widths stay aligned across the column.
+    def _add_cbar(ax, mappable, label: str):
+        div = make_axes_locatable(ax)
+        cax = div.append_axes("right", size="2%", pad=0.10)
+        cb = fig.colorbar(mappable, cax=cax)
+        cb.set_label(label)
+        cb.ax.tick_params(direction="in", length=3)
+        return cb
+
+    def _add_cbar_spacer(ax):
+        """Reserve the same right-margin width on a non-colourbar panel."""
+        div = make_axes_locatable(ax)
+        cax = div.append_axes("right", size="2%", pad=0.10)
+        cax.axis("off")
+
     # ── Row 1: SEVIRI cot map + ATLID nadir track coloured by phase ─────
     ax_map = fig.add_subplot(gs[0])
     pcm = ax_map.scatter(sl_lon[cloudy], sl_lat[cloudy], c=sl_cot[cloudy],
                          cmap=COT_CMAP, norm=COT_NORM, s=4, marker="s",
                          linewidths=0, alpha=0.65)
-    fig.colorbar(pcm, ax=ax_map, shrink=0.85, label="ORAC cot (cloudy only)")
+    _add_cbar(ax_map, pcm, "ORAC cot (cloudy only)")
     # Black halo for visibility, then phase-coloured dots on top.
     ax_map.scatter(lon, lat, c="black", s=18, linewidths=0)
     for cls, col in _PHASE_COLORS.items():
@@ -376,21 +393,23 @@ def track_panel_synergy(
                 if len(vals_iwc):
                     grid_ice[j, i] = vals_iwc.mean()
 
-    pcm2 = ax_curt.pcolormesh(along, ALT_GRID[:-1], grid_liq, cmap="Blues",
-                              norm=LIQ_EXT_NORM, shading="auto", rasterized=True)
-    fig.colorbar(pcm2, ax=ax_curt, shrink=0.85,
-                 label=r"liquid extinction [m$^{-1}$]")
-    # IWC contour overlay — outline of ice regions in red.
+    # Background ice mask — translucent grey fill where ice is present at
+    # any altitude. Subtle so it doesn't compete with the liquid extinction
+    # signal but still tells you "this column has ice".
     has_ice = np.isfinite(grid_ice) & (grid_ice > 1e-7)
     if has_ice.any():
-        ax_curt.contour(along, ALT_GRID[:-1], has_ice.astype(int),
-                        levels=[0.5], colors=["#d62728"], linewidths=0.8,
-                        linestyles="-")
+        ax_curt.contourf(along, ALT_GRID[:-1], has_ice.astype(float),
+                         levels=[0.5, 1.5], colors=["0.55"],
+                         alpha=0.18, zorder=1)
+    pcm2 = ax_curt.pcolormesh(along, ALT_GRID[:-1], grid_liq, cmap="Blues",
+                              norm=LIQ_EXT_NORM, shading="auto",
+                              rasterized=True, zorder=2)
+    _add_cbar(ax_curt, pcm2, r"liquid extinction [m$^{-1}$]")
     ax_curt.set_ylim(ATLID_VERTICAL_KM)
     ax_curt.set_xlabel("along-track distance [km]")
     ax_curt.set_ylabel("altitude [km]")
     ax_curt.set_title(
-        "ACM-CAP liquid extinction (blue fill); ice-present mask (red outline)",
+        "ACM-CAP liquid extinction (blue); ice-present columns (grey shade)",
         fontsize=10)
 
     # ── Row 3: along-track ACM-CAP τ vs ORAC cot ────────────────────────
@@ -417,6 +436,7 @@ def track_panel_synergy(
     ax_cmp.legend(loc="upper right", fontsize=8, ncol=2)
     ax_cmp.set_title("paired column τ along the orbit (water-cloud)", fontsize=10)
     ax_cmp.grid(alpha=0.3)
+    _add_cbar_spacer(ax_cmp)  # keep the same right-margin as panels 1 & 2
 
     if out is not None:
         Path(out).parent.mkdir(parents=True, exist_ok=True)

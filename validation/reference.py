@@ -125,8 +125,11 @@ def cot_cer_water_from_accap(
         ``(n_profile, n_bin)`` int8: 0 none, 1 detected, 2 in-rain, 3 in-ice.
         Only ``== 1`` bins (clean liquid) contribute to the τ-weighted CER.
     ice_water_content
-        ``(n_profile, n_bin)`` per-bin ice [kg m⁻³], NaN fill. Used only
-        to derive ``ice_present`` — we never integrate ice τ.
+        ``(n_profile, n_bin)`` per-bin ice [kg m⁻³], NaN fill. Carried
+        for completeness; ``ice_present`` is derived from
+        ``liquid_classification`` instead because ACM-CAP reports IWC > 0
+        in non-cloud bins (drizzle / precip / virga falling out of the
+        cloud bottom) ~80% of the time, which would over-flag ice.
     height
         ``(n_profile, n_bin)`` per-profile altitude grid in m (top-down).
 
@@ -142,7 +145,8 @@ def cot_cer_water_from_accap(
         ``(n_profile,)`` bool — True when ``liquid_optical_depth > 0``.
     ice_present
         ``(n_profile,)`` bool — True when any bin in the column has
-        ``ice_water_content > 0``.
+        ``liquid_classification == 3`` ("in ice"). This is ACM-CAP's
+        bin-level "detected as cloud and inside an ice region" flag.
     """
     cot = np.asarray(liquid_optical_depth, dtype=np.float64)
 
@@ -163,8 +167,11 @@ def cot_cer_water_from_accap(
         re_um = np.where(den > 0, (num / den) * 1.0e6, np.nan)
 
     liquid_present = np.isfinite(cot) & (cot > 0)
-    iwc = np.where(np.isfinite(ice_water_content), ice_water_content, 0.0)
-    ice_present = (iwc > 0).any(axis=1)
+    # ice_water_content is unused for the ice-presence flag because ACM-CAP
+    # reports IWC > 0 in many non-cloud bins (drizzle / precip below cloud
+    # base). Use the bin-level liquid_classification == 3 ("in ice") flag
+    # instead — it's strict and physically defensible.
+    ice_present = (np.asarray(liquid_classification) == 3).any(axis=1)
 
     return cot, re_um, liquid_present, ice_present
 

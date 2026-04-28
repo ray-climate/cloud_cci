@@ -51,7 +51,7 @@ flowchart TB
 ## 3. End-to-end pipeline
 
 ```mermaid
-flowchart TB
+flowchart LR
     classDef src fill:#e8f5e9,stroke:#2e7d32,color:#000
     classDef proc fill:#e3f2fd,stroke:#1565c0,color:#000
     classDef store fill:#fff3cd,stroke:#b8860b,color:#000
@@ -74,12 +74,12 @@ flowchart TB
 
     DB[("<b>matches CSV</b><br/>1 row per ATLID profile<br/>+ sev_pixel_id · n_atlid ·<br/>distance_km · time_diff_s")]:::store
 
-    AGG["<b>Aggregate</b> by sev_pixel_id<br/>per-variable rule<br/>(see §4)"]:::proc
+    AGG["<b>Aggregate</b> by sev_pixel_id<br/>per-variable rule"]:::proc
     STR["<b>Stratify</b><br/>τ · phase · lat band ·<br/>day-night · land cover"]:::proc
-    ST["<b>Stats</b><br/>continuous: bias · RMSE · R · slope<br/>categorical: HSS · POD · FAR"]:::proc
+    ST["<b>Stats</b><br/>continuous: bias · RMSE · R · slope"]:::proc
 
-    NC[("<b>stats.nc</b><br/>monthly summary<br/>+ provenance")]:::out
-    FIG["<b>Figures</b><br/>scatter · diff map ·<br/>histogram · confusion matrix"]:::out
+    NC[("<b>stats.nc</b><br/>monthly summary")]:::out
+    FIG["<b>Figures</b><br/>scatter · diff map ·<br/>histogram"]:::out
 
     ECA --> TM
     SEVF --> TM

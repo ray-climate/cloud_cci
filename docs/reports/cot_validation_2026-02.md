@@ -198,10 +198,56 @@ Three structural reasons, in approximate order of importance:
    visible / SWIR reflectance; ACM-CAP's liquid τ is anchored on lidar +
    radar with very different solar geometry sensitivity. The polar-bias
    signature is consistent with high-SZA forward-model error in ORAC.
-3. **Sub-pixel inhomogeneity**. SEVIRI pixels are several km across; ATLID
-   resolves cloud at hundreds of metres. The pixel-aggregate view averages
-   ATLID over cloudy profiles inside each pixel, but cloud fraction effects
-   and broken cloud still bias the comparison toward thicker τ in ORAC.
+3. **Sub-pixel inhomogeneity and the aggregation asymmetry**. The most
+   physics-loaded of the three; worth unpacking.
+
+   *Scales*: a SEVIRI full-disk pixel is ~ 3 km × 3 km at the sub-satellite
+   point and grows to 5–7 km at 60° latitude (off-nadir geometry stretches
+   the footprint). ATLID's nadir lidar samples every ~ 285 m along-track
+   inside the pixel — typically 10–20 ATLID profiles per SEVIRI pixel.
+   The two instruments do not measure the same volume.
+
+   *The aggregation is asymmetric*. The pixel-aggregate view
+   (`validation/statistics.py:343`, `aggregate_to_pixel_water`) builds the
+   ATLID side as the mean of `liquid_optical_depth` **over only the
+   strict-liquid profiles in the pixel** — mixed-phase, ice-only and clear
+   ATLID profiles are masked out before the mean is taken. The ORAC side
+   is the single retrieved value for the whole SEVIRI footprint; there is
+   no sub-pixel filtering on the retrieval side, because ORAC sees the
+   pixel-integrated radiance regardless of what is happening inside it.
+   So we are comparing **the mean cloudy-only ATLID τ** to **the
+   pixel-integrated ORAC τ**.
+
+   Two mechanisms make this asymmetric comparison overestimate ORAC
+   relative to ATLID:
+
+   - **Partial-cloud + 1D forward model**. ORAC's forward model is
+     plane-parallel — it assumes the pixel is fully cloud-filled. For
+     pixels with cloud fraction f < 1, the observed TOA reflectance is a
+     fraction-weighted sum of cloudy and clear contributions. Over bright
+     surfaces (sea ice, snow, desert) the clear-sky contribution can be
+     comparable to the cloudy part; the 1D model reproduces that extra
+     reflectance by retrieving a *thicker* cloud than is actually present.
+     ATLID's reference value, by construction, has had the clear-sky and
+     non-liquid profiles purged before the mean is taken — so it is the
+     true in-cloud τ. Whenever the pixel is partially cloudy and the
+     surface is bright, ORAC > ATLID by construction. This is consistent
+     with the latitude / surface gradient in the bias table (polar +18,
+     land > ocean).
+   - **3D / side-illumination effects on broken cumulus**. For broken
+     cloud at moderate solar zenith angle, photons illuminate cloud sides
+     and leak between adjacent cloud elements. The pixel is brighter than
+     a 1D forward model of the cloudy column predicts. ORAC's 1D
+     retrieval reproduces the extra brightness, again, with a thicker τ.
+
+   Working in the opposite direction is the **plane-parallel albedo bias**
+   (Cahalan et al. 1994): for sub-pixel τ heterogeneity the reflectance
+   is a concave function of τ, so a single τ retrieved from a mean
+   reflectance *underestimates* the cloudy-mean τ. This pushes
+   ORAC < ATLID. The empirical sign of our bias (+7, growing to +18 at
+   the pole) tells us the partial-cloud / surface-coupling mechanism wins
+   over the plane-parallel albedo bias in the February 2026 SEVIRI
+   sample.
 
 These mechanisms add scatter on top of any genuine retrieval bias. The
 all-stratum +7 bias is the net effect after pixel aggregation.

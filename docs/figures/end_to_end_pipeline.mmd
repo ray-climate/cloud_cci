@@ -1,0 +1,45 @@
+flowchart LR
+    classDef src fill:#e8f5e9,stroke:#2e7d32,color:#000
+    classDef proc fill:#e3f2fd,stroke:#1565c0,color:#000
+    classDef store fill:#fff3cd,stroke:#b8860b,color:#000
+    classDef out fill:#fce4ec,stroke:#ad1457,color:#000
+
+    subgraph EC["EarthCARE L2 (via ESA MAAP)"]
+        ECA["ATLID-only<br/>(<b>driver track</b>)"]:::src
+        ECS["Synergy nadir<br/>(secondary)"]:::src
+    end
+
+    subgraph SEV["SEVIRI ORAC L2 (15-min slots)"]
+        SEVF["3712 × 3712 disk<br/>cot · cer · cth · ...<br/>land/sea mask"]:::src
+    end
+
+    TM["<b>Time match</b><br/>nearest SEVIRI slot<br/>|Δt| ≤ 7.5 min"]:::proc
+    SM["<b>Space match</b><br/>on-disk filter +<br/>nearest pixel (haversine)<br/>distance recorded"]:::proc
+    NJ["<b>Nadir join</b><br/>by along_track index<br/>(synergy on ATLID grid)"]:::proc
+
+    REF["<b>Reference mapper</b><br/>extract ORAC-equivalent<br/>per ATLID profile"]:::proc
+
+    DB[("<b>matches CSV</b><br/>1 row per ATLID profile<br/>+ sev_pixel_id · n_atlid ·<br/>distance_km · time_diff_s")]:::store
+
+    AGG["<b>Aggregate</b> by sev_pixel_id<br/>per-variable rule"]:::proc
+    STR["<b>Stratify</b><br/>τ · phase · lat band ·<br/>day-night · land cover"]:::proc
+    ST["<b>Stats</b><br/>continuous: bias · RMSE · R · slope"]:::proc
+
+    NC[("<b>stats.nc</b><br/>monthly summary")]:::out
+    FIG["<b>Figures</b><br/>scatter · diff map ·<br/>histogram"]:::out
+
+    ECA --> TM
+    SEVF --> TM
+    TM --> SM
+    ECA --> SM
+    SEVF --> SM
+    SM --> REF
+    ECS --> NJ
+    ECA --> NJ
+    NJ --> REF
+    REF --> DB
+    DB --> AGG
+    AGG --> STR
+    STR --> ST
+    ST --> NC
+    ST --> FIG

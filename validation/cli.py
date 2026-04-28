@@ -323,7 +323,7 @@ def _process_frame_synergy(
         print(f"  [{fid}] read failed: {e}", file=sys.stderr)
         return None, "fail"
 
-    cot_w, cer_w, liq_only = cot_cer_water_from_accap(
+    cot_w, cer_w, liq_present, ice_present = cot_cer_water_from_accap(
         track["liquid_optical_depth"], track["liquid_extinction"],
         track["liquid_eff_radius"], track["liquid_classification"],
         track["ice_water_content"], track["height"],
@@ -343,7 +343,11 @@ def _process_frame_synergy(
 
     matches["cot_water_atlid"] = cot_w
     matches["cer_water_atlid"] = cer_w
-    matches["liquid_only_atlid"] = liq_only
+    matches["liquid_present_atlid"] = liq_present
+    matches["ice_present_atlid"] = ice_present
+    # Convenience derived flag retained for legacy strata; equivalent to
+    # liquid_present & ~ice_present.
+    matches["liquid_only_atlid"] = liq_present & ~ice_present
     matches["quality_status_atlid"] = track["quality_status"]
     matches["convergence_status_atlid"] = track["convergence_status"]
     matches["synergy_status_atlid"] = track["synergy_status"]

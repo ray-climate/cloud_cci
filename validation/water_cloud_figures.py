@@ -276,7 +276,7 @@ def qc_sensitivity_panel(
     a = stats[stats["stratum"] == "all"].copy()
     if a.empty:
         raise ValueError("stats has no 'all' stratum rows")
-    qc_order = ["qc_off", "qc_mixed_phase", "qc_relaxed", "qc_strict"]
+    qc_order = ["qc_off", "qc_relaxed", "qc_strict"]
     a["qc_mode"] = pd.Categorical(a["qc_mode"], categories=qc_order, ordered=True)
     a = a.sort_values(["qc_mode", "view"])
     fig, axes = plt.subplots(2, 2, figsize=(12, 8))

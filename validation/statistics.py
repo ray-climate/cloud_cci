@@ -263,6 +263,36 @@ def _surface_strata(lsflag_col: str, lat_col: str, dist_col: str,
     }
 
 
+def _composition_strata(phase_col: str = "phase_orac") -> dict[str, StratumFn]:
+    """Pixel-composition strata derived from the phase-fraction columns
+    emitted by :func:`aggregate_to_pixel_water`. Apples-to-apples filters
+    that lift phase composition from per-profile (where ATLID is nadir-
+    narrow) to per-SEVIRI-pixel (the actual ORAC footprint).
+    """
+    def _frac(col: str) -> StratumFn:
+        return lambda d: (d[col] if col in d.columns else pd.Series(0.0, index=d.index))
+
+    return {
+        "water_pure_pixel":     lambda d: _frac("frac_liquid_only")(d) >= 0.8,
+        "water_dominant_pixel": lambda d: (_frac("frac_liquid_only")(d) >= 0.5) & (_frac("frac_liquid_only")(d) < 0.8),
+        "mixed_pixel":          lambda d: _frac("frac_mixed")(d) >= 0.3,
+        "not_water_pixel":      lambda d: _frac("frac_liquid_only")(d) < 0.3,
+        # Phase-agreement subsets, restricted to water-pure pixels.
+        "phase_agree_liquid": lambda d: (
+            (_frac("frac_liquid_only")(d) >= 0.8)
+            & ((d[phase_col] == 1) if phase_col in d.columns else pd.Series(False, index=d.index))
+        ),
+        "phase_disagree_atlid_liquid": lambda d: (
+            (_frac("frac_liquid_only")(d) >= 0.8)
+            & ((d[phase_col] == 2) if phase_col in d.columns else pd.Series(False, index=d.index))
+        ),
+        # CPR contribution (pixel-level: max==0 → CPR assimilated for every
+        # profile in the pixel).
+        "atlid_radar_synergy": lambda d: (d["cpr_assim_status"] == 0) if "cpr_assim_status" in d.columns else pd.Series(False, index=d.index),
+        "atlid_only":          lambda d: (d["cpr_assim_status"] != 0) if "cpr_assim_status" in d.columns else pd.Series(False, index=d.index),
+    }
+
+
 def cot_water_strata(
     cot_atlid_col: str = "cot_water_atlid",
     lat_col: str = "ec_lat",
@@ -273,19 +303,18 @@ def cot_water_strata(
 ) -> dict[str, StratumFn | None]:
     """Stratification for water-cloud cot validation.
 
-    Standard surface / lat / dist / Δt strata, plus τ-bands and ORAC-phase
-    agreement strata (phase_orac == 1 = liquid).
+    Standard surface / lat / dist / Δt strata, plus pixel-composition
+    strata (water_pure_pixel = headline; phase_agree_liquid / phase_disagree;
+    mixed_pixel / not_water_pixel), τ bands on the pixel ATLID value, and
+    CPR-contribution strata.
     """
     strata = _surface_strata(lsflag_col, lat_col, dist_col, tdiff_col)
+    strata.update(_composition_strata(phase_col))
     strata.update({
         "tau_thin":       lambda d: (d[cot_atlid_col] >= 0.15) & (d[cot_atlid_col] < 1),
         "tau_mid":        lambda d: (d[cot_atlid_col] >= 1) & (d[cot_atlid_col] < 3),
         "tau_thick":      lambda d: (d[cot_atlid_col] >= 3) & (d[cot_atlid_col] < 10),
         "tau_very_thick": lambda d: d[cot_atlid_col] >= 10,
-        "orac_liquid":    lambda d: (d[phase_col] == 1) if phase_col in d.columns else pd.Series(False, index=d.index),
-        "orac_ice":       lambda d: (d[phase_col] == 2) if phase_col in d.columns else pd.Series(False, index=d.index),
-        "atlid_radar_synergy": lambda d: (d["cpr_assim_status"] == 0) if "cpr_assim_status" in d.columns else pd.Series(False, index=d.index),
-        "atlid_only":          lambda d: (d["cpr_assim_status"] != 0) if "cpr_assim_status" in d.columns else pd.Series(False, index=d.index),
     })
     return strata
 
@@ -298,16 +327,15 @@ def cer_water_strata(
     lsflag_col: str = "lsflag_orac",
     phase_col: str = "phase_orac",
 ) -> dict[str, StratumFn | None]:
-    """Stratification for water-cloud cer validation. CER bands instead of τ-bands."""
+    """Stratification for water-cloud cer validation. CER bands instead of τ-bands;
+    same composition strata as :func:`cot_water_strata`.
+    """
     strata = _surface_strata(lsflag_col, lat_col, dist_col, tdiff_col)
+    strata.update(_composition_strata(phase_col))
     strata.update({
         "cer_small":  lambda d: d[cer_atlid_col] < 8,
         "cer_mid":    lambda d: (d[cer_atlid_col] >= 8) & (d[cer_atlid_col] < 16),
         "cer_large":  lambda d: d[cer_atlid_col] >= 16,
-        "orac_liquid": lambda d: (d[phase_col] == 1) if phase_col in d.columns else pd.Series(False, index=d.index),
-        "orac_ice":    lambda d: (d[phase_col] == 2) if phase_col in d.columns else pd.Series(False, index=d.index),
-        "atlid_radar_synergy": lambda d: (d["cpr_assim_status"] == 0) if "cpr_assim_status" in d.columns else pd.Series(False, index=d.index),
-        "atlid_only":          lambda d: (d["cpr_assim_status"] != 0) if "cpr_assim_status" in d.columns else pd.Series(False, index=d.index),
     })
     return strata
 
@@ -317,16 +345,47 @@ def aggregate_to_pixel_water(
     var_atlid: str,
     var_orac: str,
 ) -> pd.DataFrame:
-    """Pixel-aggregate for water-cloud variables. ATLID = mean over rows
-    in the pixel (NaNs from non-water profiles already skipped). ORAC =
-    first (constant within a pixel by construction).
+    """Pixel-aggregate for water-cloud variables — apples-to-apples comparison.
+
+    ATLID-side value (``var_atlid``) is the mean over **only the
+    strict-liquid profiles** in the pixel (per-profile ``liquid_only_atlid``
+    True). Mixed-phase, ice-only and clear profiles are excluded from the
+    mean — pixels with no strict-liquid profile come out as NaN and drop
+    out of the comparison naturally.
+
+    Phase composition is emitted as profile counts and fractions
+    (``frac_liquid_only``, ``frac_mixed``, ``frac_ice_only``,
+    ``frac_clear``) so the pixel-composition strata in
+    :func:`cot_water_strata` can pick out water-pure pixels for the
+    headline comparison.
+
+    Required columns in ``matches``: ``liquid_only_atlid``,
+    ``liquid_present_atlid``, ``ice_present_atlid`` (all bool/0-1).
     """
-    extras_first = [c for c in ("lsflag_orac", "phase_orac") if c in matches.columns]
+    df = matches.copy()
+
+    liquid_only = df["liquid_only_atlid"].astype(bool)
+    liquid_present = df["liquid_present_atlid"].astype(bool)
+    ice_present = df["ice_present_atlid"].astype(bool)
+
+    # Mask the ATLID reference so the pixel mean is over liquid_only profiles.
+    df[var_atlid] = df[var_atlid].where(liquid_only)
+
+    # Phase-class indicators for partition counting (mutually exclusive).
+    df["_n_liquid_only"] = liquid_only.astype(np.int8)
+    df["_n_mixed"] = (liquid_present & ice_present).astype(np.int8)
+    df["_n_ice_only"] = (~liquid_present & ice_present).astype(np.int8)
+    df["_n_clear"] = (~liquid_present & ~ice_present).astype(np.int8)
+
+    extras_first = [c for c in ("lsflag_orac", "phase_orac") if c in df.columns]
     agg = {
         var_atlid: (var_atlid, "mean"),
         var_orac: (var_orac, "mean"),
-        "n_atlid": (var_atlid, "size"),
-        "n_atlid_water": (var_atlid, "count"),
+        "n_total": (var_orac, "size"),
+        "n_liquid_only": ("_n_liquid_only", "sum"),
+        "n_mixed":       ("_n_mixed", "sum"),
+        "n_ice_only":    ("_n_ice_only", "sum"),
+        "n_clear":       ("_n_clear", "sum"),
         "ec_lat": ("ec_lat", "mean"),
         "distance_km": ("distance_km", "mean"),
         "time_diff_s": ("time_diff_s", "mean"),
@@ -334,10 +393,16 @@ def aggregate_to_pixel_water(
         "convergence_status_atlid": ("convergence_status_atlid", "max"),
         "cpr_assim_status": ("cpr_assim_status", "max"),
         "atlid_assim_status": ("atlid_assim_status", "max"),
-        "liquid_only_atlid": ("liquid_only_atlid", "all"),
         **{c: (c, "first") for c in extras_first},
     }
-    return matches.groupby(["sev_scan_time", "sev_pixel_id"], as_index=False).agg(**agg)
+    out = df.groupby(["sev_scan_time", "sev_pixel_id"], as_index=False).agg(**agg)
+
+    n_total = out["n_total"].astype(np.float64).clip(lower=1)
+    out["frac_liquid_only"] = out["n_liquid_only"] / n_total
+    out["frac_mixed"]       = out["n_mixed"] / n_total
+    out["frac_ice_only"]    = out["n_ice_only"] / n_total
+    out["frac_clear"]       = out["n_clear"] / n_total
+    return out
 
 
 def dedupe_to_sample_water(matches: pd.DataFrame) -> pd.DataFrame:
@@ -354,7 +419,7 @@ def _water_report(
     var_atlid: str,
     var_orac: str,
     strata_factory: Callable[[], dict[str, StratumFn | None]],
-    qc_modes: tuple[str, ...] = ("qc_off", "qc_strict", "qc_relaxed", "qc_mixed_phase"),
+    qc_modes: tuple[str, ...] = ("qc_off", "qc_strict", "qc_relaxed"),
 ) -> pd.DataFrame:
     """Generic engine for cot_water / cer_water reports."""
     base_mask = (
@@ -473,25 +538,23 @@ def _synergy_qc_off(d: pd.DataFrame) -> pd.Series:
 
 
 def _synergy_qc_strict(d: pd.DataFrame) -> pd.Series:
-    """``quality_status == 0`` AND ``liquid_only_atlid`` (no ice in column)."""
-    return (d["quality_status_atlid"] == 0) & d["liquid_only_atlid"].astype(bool)
+    """``quality_status == 0`` (variational converged with all observations).
 
-
-def _synergy_qc_relaxed(d: pd.DataFrame) -> pd.Series:
-    """``quality_status ∈ {0, 1}`` AND strict-liquid filter."""
-    return d["quality_status_atlid"].isin([0, 1]) & d["liquid_only_atlid"].astype(bool)
-
-
-def _synergy_qc_mixed_phase(d: pd.DataFrame) -> pd.Series:
-    """``quality_status == 0``, allow mixed-phase columns (no ice-free filter)."""
+    No phase filter — phase composition is now applied as a stratum at
+    pixel level (see :func:`cot_water_strata`).
+    """
     return d["quality_status_atlid"] == 0
 
 
+def _synergy_qc_relaxed(d: pd.DataFrame) -> pd.Series:
+    """``quality_status ∈ {0, 1}`` — accept "unconverged but usable" too."""
+    return d["quality_status_atlid"].isin([0, 1])
+
+
 SYNERGY_QC_MODES: dict[str, Callable[[pd.DataFrame], pd.Series]] = {
-    "qc_off":          _synergy_qc_off,
-    "qc_strict":       _synergy_qc_strict,
-    "qc_relaxed":      _synergy_qc_relaxed,
-    "qc_mixed_phase":  _synergy_qc_mixed_phase,
+    "qc_off":     _synergy_qc_off,
+    "qc_strict":  _synergy_qc_strict,
+    "qc_relaxed": _synergy_qc_relaxed,
 }
 
 

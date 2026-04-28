@@ -256,6 +256,7 @@ def track_panel_synergy(
     matches: pd.DataFrame,
     seviri_root: str | Path,
     retrieval: str = "R11",
+    matches_r10: pd.DataFrame | None = None,
     out: str | Path | None = None,
 ) -> plt.Figure:
     """Three-panel case-study figure for one ACM-CAP frame.
@@ -264,12 +265,14 @@ def track_panel_synergy(
       1. SEVIRI cot map zoomed to the ACM-CAP nadir track. Track points
          coloured by per-profile phase classification (liquid_only / mixed
          / ice_only / clear) — shows where ACM-CAP says the cloud is liquid.
+         Cot field on the map is the ``retrieval`` requested (R10 or R11).
       2. ACM-CAP liquid extinction curtain + ice-water-content overlay.
          Reveals how much of the column has lidar+radar signal vs not.
       3. Along-track line plot: ACM-CAP liquid_optical_depth vs ORAC cot
-         at the matched SEVIRI pixel. Phase classification shaded along
-         the bottom. Where bias is large, you can see the lines diverge
-         and read off whether it's a phase, footprint, or detection issue.
+         at the matched SEVIRI pixel. If ``matches_r10`` is supplied,
+         the R10 cot is plotted alongside R11 so the two retrievals can
+         be compared directly along the orbit. Bottom-of-panel green
+         markers indicate CPR-assimilated profiles.
     """
     fr = matches[matches["frame_id"] == frame_id].sort_values("ec_time").reset_index(drop=True)
     if fr.empty:
@@ -373,18 +376,38 @@ def track_panel_synergy(
                         & (base["quality_status_atlid"] == 0)]
     else:
         headline = base
-    if len(headline) >= 2:
-        diff = headline["cot_orac"] - headline["cot_water_atlid"]
-        bias = float(diff.mean())
-        rmse = float(np.sqrt((diff ** 2).mean()))
-        r = float(np.corrcoef(headline["cot_water_atlid"], headline["cot_orac"])[0, 1])
-        stat_str = f"  bias={bias:+.2f}  RMSE={rmse:.2f}  R={r:.2f}"
-    else:
-        stat_str = ""
+    def _bias_rmse_r(d):
+        if len(d) < 2:
+            return float("nan"), float("nan"), float("nan")
+        diff = d["cot_orac"] - d["cot_water_atlid"]
+        return (
+            float(diff.mean()),
+            float(np.sqrt((diff ** 2).mean())),
+            float(np.corrcoef(d["cot_water_atlid"], d["cot_orac"])[0, 1])
+            if d["cot_water_atlid"].std() > 0 and d["cot_orac"].std() > 0 else float("nan"),
+        )
+    bias_r11, rmse_r11, r_r11 = _bias_rmse_r(headline)
+    stat_str = (f"  R11: bias={bias_r11:+.2f}  RMSE={rmse_r11:.2f}  R={r_r11:.2f}"
+                if len(headline) >= 2 else "")
+    if matches_r10 is not None and "cot_orac" in matches_r10.columns:
+        # Subset R10 matches to the same ec_time set we just statted for R11.
+        r10_fr_full = (matches_r10[matches_r10["frame_id"] == frame_id].copy())
+        r10_fr_full["ec_time"] = pd.to_datetime(r10_fr_full["ec_time"])
+        headline_keys = pd.to_datetime(headline["ec_time"]).values
+        r10_subset = r10_fr_full[r10_fr_full["ec_time"].isin(headline_keys)]
+        # Build apples-to-apples DataFrame: ATLID side from R11 (identical to
+        # R10), ORAC side from R10.
+        if not r10_subset.empty:
+            head_dt = headline.copy()
+            head_dt["ec_time"] = pd.to_datetime(head_dt["ec_time"])
+            joined = (head_dt[["ec_time", "cot_water_atlid"]]
+                      .merge(r10_subset[["ec_time", "cot_orac"]], on="ec_time"))
+            bias_r10, rmse_r10, r_r10 = _bias_rmse_r(joined)
+            stat_str += f"   R10: bias={bias_r10:+.2f}  RMSE={rmse_r10:.2f}  R={r_r10:.2f}"
     ax_map.set_title(
         f"frame {frame_id}  scan={scan_time.strftime('%Y-%m-%d %H:%M UTC')}  "
-        f"retrieval={retrieval}  N_liquid_only={len(headline)}{stat_str}",
-        fontsize=10)
+        f"N_liquid_only={len(headline)}{stat_str}",
+        fontsize=9)
     ax_map.grid(alpha=0.3)
 
     # ── Row 2: ACM-CAP liquid extinction curtain + IWC overlay ──────────
@@ -446,8 +469,23 @@ def track_panel_synergy(
         np.arange(len(along)), along, left=along[0], right=along[-1])
     ax_cmp.plot(fr_t["along"], fr_t["cot_water_atlid"], "k-", lw=0.7,
                 label="ACM-CAP liquid τ")
-    ax_cmp.plot(fr_t["along"], fr_t["cot_orac"], color="tab:orange", lw=0.7,
-                label="ORAC cot")
+    # If R10 matches are supplied, merge it onto the same ec_time index and
+    # overlay both ORAC retrievals so the user can read R10 vs R11 along
+    # the orbit. R10's cot is shown dashed and lighter.
+    if matches_r10 is not None and "cot_orac" in matches_r10.columns:
+        r10_fr = (matches_r10[matches_r10["frame_id"] == frame_id]
+                  .sort_values("ec_time")[["ec_time", "cot_orac"]]
+                  .rename(columns={"cot_orac": "cot_orac_r10"}))
+        r10_fr["ec_time"] = pd.to_datetime(r10_fr["ec_time"])
+        fr_t["ec_time"] = pd.to_datetime(fr_t["ec_time"])
+        fr_t = fr_t.merge(r10_fr, on="ec_time", how="left")
+        ax_cmp.plot(fr_t["along"], fr_t["cot_orac_r10"], color="tab:cyan",
+                    lw=0.7, ls="--", label=f"ORAC cot (R10)")
+        ax_cmp.plot(fr_t["along"], fr_t["cot_orac"], color="tab:orange",
+                    lw=0.7, label=f"ORAC cot ({retrieval})")
+    else:
+        ax_cmp.plot(fr_t["along"], fr_t["cot_orac"], color="tab:orange",
+                    lw=0.7, label=f"ORAC cot ({retrieval})")
     # Phase classification shaded along the bottom.
     cpr_used = (fr_t["cpr_assim_status"] == 0) if "cpr_assim_status" in fr_t.columns else pd.Series(False, index=fr_t.index)
     if cpr_used.any():

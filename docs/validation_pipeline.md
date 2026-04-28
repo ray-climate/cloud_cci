@@ -48,7 +48,7 @@ flowchart TB
 
 ---
 
-## 3. End-to-end pipeline
+<h1 style="font-size: 2.5em;">3. End-to-end pipeline</h1>
 
 ```mermaid
 flowchart LR

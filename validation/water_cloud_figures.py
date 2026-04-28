@@ -26,10 +26,13 @@ from .cth_figures import (
     _save, _stat_text, _stats,
 )
 
-COT_LIM = (-1.0, 2.0)        # log10 of cot (0.1 .. 100)
-COT_TICKS = (-1, 0, 1, 2)
-COT_TLABELS = ("0.1", "1", "10", "100")
+COT_LOG_LIM = (-1.0, 2.0)    # log10 of cot (0.1 .. 100)
+COT_LOG_TICKS = (-1, 0, 1, 2)
+COT_LOG_TLABELS = ("0.1", "1", "10", "100")
 COT_FLOOR = 0.1              # display floor; clip <0.1 to 0.1 for scatter
+
+COT_LIN_LIM = (0.0, 60.0)    # linear cot
+COT_LIN_TICKS = (0, 10, 20, 30, 40, 50, 60)
 
 CER_LIM = (0.0, 30.0)        # µm
 CER_TICKS = (0, 5, 10, 15, 20, 25, 30)
@@ -39,16 +42,23 @@ def _logclip(s: pd.Series, floor: float = COT_FLOOR) -> np.ndarray:
     return np.log10(s.clip(lower=floor).values)
 
 
-def _setup_cot_axes(ax) -> None:
-    """Log10 axes for cot validation, ATLID on x and ORAC on y."""
-    ax.set_xlim(COT_LIM); ax.set_ylim(COT_LIM)
-    ax.set_xticks(COT_TICKS); ax.set_yticks(COT_TICKS)
-    ax.set_xticklabels(COT_TLABELS); ax.set_yticklabels(COT_TLABELS)
+def _setup_cot_axes(ax, scale: str = "log") -> None:
+    """COT axes for ATLID (x) vs ORAC (y). ``scale`` is 'log' or 'linear'."""
+    if scale == "log":
+        lim, ticks, labels = COT_LOG_LIM, COT_LOG_TICKS, COT_LOG_TLABELS
+    elif scale == "linear":
+        lim, ticks, labels = COT_LIN_LIM, COT_LIN_TICKS, None
+    else:
+        raise ValueError(f"unknown cot scale {scale!r}; expected 'log' or 'linear'")
+    ax.set_xlim(lim); ax.set_ylim(lim)
+    ax.set_xticks(ticks); ax.set_yticks(ticks)
+    if labels is not None:
+        ax.set_xticklabels(labels); ax.set_yticklabels(labels)
     ax.set_aspect("equal", adjustable="box")
     ax.tick_params(direction="in", top=True, right=True, length=4)
     ax.set_xlabel(r"ACM-CAP liquid optical depth $\tau$")
     ax.set_ylabel(r"ORAC SEVIRI cot")
-    ax.plot(COT_LIM, COT_LIM, color="0.2", lw=0.9, ls="--", zorder=3)
+    ax.plot(lim, lim, color="0.2", lw=0.9, ls="--", zorder=3)
 
 
 def _setup_cer_axes(ax) -> None:
@@ -65,25 +75,37 @@ def _setup_cer_axes(ax) -> None:
 # ---------------------------------------------------------------------------
 # Internal mode-aware helpers
 # ---------------------------------------------------------------------------
+# ``mode`` accepts 'cot' (log), 'cot_linear' (linear cot), 'cer' (linear µm).
 
 def _setup_axes(ax, mode: str) -> None:
     if mode == "cot":
-        _setup_cot_axes(ax)
+        _setup_cot_axes(ax, scale="log")
+    elif mode == "cot_linear":
+        _setup_cot_axes(ax, scale="linear")
     elif mode == "cer":
         _setup_cer_axes(ax)
     else:
-        raise ValueError(f"unknown mode {mode!r}; expected 'cot' or 'cer'")
+        raise ValueError(
+            f"unknown mode {mode!r}; expected 'cot', 'cot_linear', or 'cer'"
+        )
 
 
 def _xy_for_mode(d: pd.DataFrame, x: str, y: str, mode: str) -> tuple[np.ndarray, np.ndarray]:
-    """Return numeric (x, y) arrays in axis space (log10 for cot, linear for cer)."""
+    """Return numeric (x, y) arrays in axis space.
+
+    'cot' uses log10(clip≥0.1); 'cot_linear' and 'cer' are passed through.
+    """
     if mode == "cot":
         return _logclip(d[x]), _logclip(d[y])
     return d[x].values, d[y].values
 
 
 def _lim_for_mode(mode: str) -> tuple[float, float]:
-    return COT_LIM if mode == "cot" else CER_LIM
+    return {
+        "cot": COT_LOG_LIM,
+        "cot_linear": COT_LIN_LIM,
+        "cer": CER_LIM,
+    }[mode]
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +135,7 @@ def scatter_panel(
             xv, yv = _xy_for_mode(d2, x, y, mode)
             im = _density_image(ax, xv, yv, lim=_lim_for_mode(mode))
             _attach_colorbar(fig, ax, im, label="count")
-        _stat_text(ax, n, bias, rmse, r, unit=("" if mode == "cot" else r"$\mu$m"))
+        _stat_text(ax, n, bias, rmse, r, unit=("" if mode.startswith("cot") else r"$\mu$m"))
         ax.set_title(label, pad=6)
     if suptitle:
         fig.suptitle(suptitle, fontsize=11, y=1.02)
@@ -141,7 +163,7 @@ def scatter_compare(
             xv, yv = _xy_for_mode(d2, x, y, mode)
             im = _density_image(ax, xv, yv, lim=_lim_for_mode(mode))
             _attach_colorbar(fig, ax, im, label="count")
-        _stat_text(ax, n, bias, rmse, r, unit=("" if mode == "cot" else r"$\mu$m"))
+        _stat_text(ax, n, bias, rmse, r, unit=("" if mode.startswith("cot") else r"$\mu$m"))
         ax.set_title(label, pad=6)
     if suptitle:
         fig.suptitle(suptitle, fontsize=11, y=1.02)
@@ -177,7 +199,7 @@ def scatter_compare_by_surface(
                 xv, yv = _xy_for_mode(d2, x, y, mode)
                 im = _density_image(ax, xv, yv, lim=_lim_for_mode(mode))
                 _attach_colorbar(fig, ax, im, label="count")
-            _stat_text(ax, n, bias, rmse, r, unit=("" if mode == "cot" else r"$\mu$m"))
+            _stat_text(ax, n, bias, rmse, r, unit=("" if mode.startswith("cot") else r"$\mu$m"))
             ax.set_title(f"{r_name} — {s_name}", pad=6)
     if suptitle:
         fig.suptitle(suptitle, fontsize=11, y=1.0)

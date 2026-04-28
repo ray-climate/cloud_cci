@@ -864,7 +864,8 @@ def _cmd_water_figures(args, *, mode, var_atlid, var_orac, strata_fn, report_fn,
 
 
 def cmd_cot_water_figures(args: argparse.Namespace) -> int:
-    return _cmd_water_figures(args, mode="cot",
+    mode = "cot_linear" if getattr(args, "scale", "log") == "linear" else "cot"
+    return _cmd_water_figures(args, mode=mode,
                                var_atlid="cot_water_atlid", var_orac="cot_orac",
                                strata_fn=cot_water_strata, report_fn=cot_water_report,
                                prefix="cot_water")
@@ -939,7 +940,8 @@ def _cmd_water_compare(args, *, mode, var_atlid, var_orac, strata_fn, prefix) ->
 
 
 def cmd_cot_water_compare(args: argparse.Namespace) -> int:
-    return _cmd_water_compare(args, mode="cot",
+    mode = "cot_linear" if getattr(args, "scale", "log") == "linear" else "cot"
+    return _cmd_water_compare(args, mode=mode,
                                var_atlid="cot_water_atlid", var_orac="cot_orac",
                                strata_fn=cot_water_strata, prefix="cot_water")
 
@@ -1062,6 +1064,9 @@ def build_parser() -> argparse.ArgumentParser:
         fg.add_argument("--qc-mode", default="qc_strict",
                         choices=tuple(SYNERGY_QC_MODES),
                         help="QC base filter for the headline panels.")
+        if var == "cot-water":
+            fg.add_argument("--scale", default="log", choices=("log", "linear"),
+                            help="COT scatter axis scale.")
         fg.add_argument("--label", default="", help="Title prefix")
         fg.set_defaults(func=fig_fn)
 
@@ -1073,6 +1078,9 @@ def build_parser() -> argparse.ArgumentParser:
         cmp.add_argument("--qc-mode", default="qc_strict",
                          choices=tuple(SYNERGY_QC_MODES),
                          help="QC base filter applied to both R10 and R11.")
+        if var == "cot-water":
+            cmp.add_argument("--scale", default="log", choices=("log", "linear"),
+                             help="COT scatter axis scale.")
         cmp.add_argument("--label", default="", help="Title prefix")
         cmp.set_defaults(func=cmp_fn)
 

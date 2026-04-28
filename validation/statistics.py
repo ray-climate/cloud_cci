@@ -246,6 +246,159 @@ def cot_report(
 # CTH report
 # ---------------------------------------------------------------------------
 
+def _surface_strata(lsflag_col: str, lat_col: str, dist_col: str,
+                    tdiff_col: str) -> dict[str, StratumFn | None]:
+    return {
+        "all": None,
+        "ocean": lambda d: (d[lsflag_col] < 0.5) if lsflag_col in d.columns else pd.Series(False, index=d.index),
+        "land":  lambda d: (d[lsflag_col] >= 0.5) if lsflag_col in d.columns else pd.Series(False, index=d.index),
+        "lat_tropics": lambda d: np.abs(d[lat_col]) < 30,
+        "lat_midlat":  lambda d: (np.abs(d[lat_col]) >= 30) & (np.abs(d[lat_col]) < 60),
+        "lat_polar":   lambda d: np.abs(d[lat_col]) >= 60,
+        "dist_lt2km":   lambda d: d[dist_col] < 2,
+        "dist_2_5km":   lambda d: (d[dist_col] >= 2) & (d[dist_col] < 5),
+        "dist_ge5km":   lambda d: d[dist_col] >= 5,
+        "tdiff_lt3min": lambda d: d[tdiff_col] < 180,
+        "tdiff_ge3min": lambda d: d[tdiff_col] >= 180,
+    }
+
+
+def cot_water_strata(
+    cot_atlid_col: str = "cot_water_atlid",
+    lat_col: str = "ec_lat",
+    dist_col: str = "distance_km",
+    tdiff_col: str = "time_diff_s",
+    lsflag_col: str = "lsflag_orac",
+    phase_col: str = "phase_orac",
+) -> dict[str, StratumFn | None]:
+    """Stratification for water-cloud cot validation.
+
+    Standard surface / lat / dist / Δt strata, plus τ-bands and ORAC-phase
+    agreement strata (phase_orac == 1 = liquid).
+    """
+    strata = _surface_strata(lsflag_col, lat_col, dist_col, tdiff_col)
+    strata.update({
+        "tau_thin":       lambda d: (d[cot_atlid_col] >= 0.15) & (d[cot_atlid_col] < 1),
+        "tau_mid":        lambda d: (d[cot_atlid_col] >= 1) & (d[cot_atlid_col] < 3),
+        "tau_thick":      lambda d: (d[cot_atlid_col] >= 3) & (d[cot_atlid_col] < 10),
+        "tau_very_thick": lambda d: d[cot_atlid_col] >= 10,
+        "orac_liquid":    lambda d: (d[phase_col] == 1) if phase_col in d.columns else pd.Series(False, index=d.index),
+        "orac_ice":       lambda d: (d[phase_col] == 2) if phase_col in d.columns else pd.Series(False, index=d.index),
+        "atlid_radar_synergy": lambda d: (d["cpr_assim_status"] == 0) if "cpr_assim_status" in d.columns else pd.Series(False, index=d.index),
+        "atlid_only":          lambda d: (d["cpr_assim_status"] != 0) if "cpr_assim_status" in d.columns else pd.Series(False, index=d.index),
+    })
+    return strata
+
+
+def cer_water_strata(
+    cer_atlid_col: str = "cer_water_atlid",
+    lat_col: str = "ec_lat",
+    dist_col: str = "distance_km",
+    tdiff_col: str = "time_diff_s",
+    lsflag_col: str = "lsflag_orac",
+    phase_col: str = "phase_orac",
+) -> dict[str, StratumFn | None]:
+    """Stratification for water-cloud cer validation. CER bands instead of τ-bands."""
+    strata = _surface_strata(lsflag_col, lat_col, dist_col, tdiff_col)
+    strata.update({
+        "cer_small":  lambda d: d[cer_atlid_col] < 8,
+        "cer_mid":    lambda d: (d[cer_atlid_col] >= 8) & (d[cer_atlid_col] < 16),
+        "cer_large":  lambda d: d[cer_atlid_col] >= 16,
+        "orac_liquid": lambda d: (d[phase_col] == 1) if phase_col in d.columns else pd.Series(False, index=d.index),
+        "orac_ice":    lambda d: (d[phase_col] == 2) if phase_col in d.columns else pd.Series(False, index=d.index),
+        "atlid_radar_synergy": lambda d: (d["cpr_assim_status"] == 0) if "cpr_assim_status" in d.columns else pd.Series(False, index=d.index),
+        "atlid_only":          lambda d: (d["cpr_assim_status"] != 0) if "cpr_assim_status" in d.columns else pd.Series(False, index=d.index),
+    })
+    return strata
+
+
+def aggregate_to_pixel_water(
+    matches: pd.DataFrame,
+    var_atlid: str,
+    var_orac: str,
+) -> pd.DataFrame:
+    """Pixel-aggregate for water-cloud variables. ATLID = mean over rows
+    in the pixel (NaNs from non-water profiles already skipped). ORAC =
+    first (constant within a pixel by construction).
+    """
+    extras_first = [c for c in ("lsflag_orac", "phase_orac") if c in matches.columns]
+    agg = {
+        var_atlid: (var_atlid, "mean"),
+        var_orac: (var_orac, "mean"),
+        "n_atlid": (var_atlid, "size"),
+        "n_atlid_water": (var_atlid, "count"),
+        "ec_lat": ("ec_lat", "mean"),
+        "distance_km": ("distance_km", "mean"),
+        "time_diff_s": ("time_diff_s", "mean"),
+        "quality_status_atlid": ("quality_status_atlid", "max"),
+        "convergence_status_atlid": ("convergence_status_atlid", "max"),
+        "cpr_assim_status": ("cpr_assim_status", "max"),
+        "atlid_assim_status": ("atlid_assim_status", "max"),
+        "liquid_only_atlid": ("liquid_only_atlid", "all"),
+        **{c: (c, "first") for c in extras_first},
+    }
+    return matches.groupby(["sev_scan_time", "sev_pixel_id"], as_index=False).agg(**agg)
+
+
+def dedupe_to_sample_water(matches: pd.DataFrame) -> pd.DataFrame:
+    """Sample-level view: one row per SEVIRI pixel, nearest ATLID profile.
+    Mirrors :func:`dedupe_to_sample` — kept separate so the cth path is
+    untouched if rules diverge later.
+    """
+    idx = matches.groupby("sev_pixel_id")["distance_km"].idxmin()
+    return matches.loc[idx].reset_index(drop=True)
+
+
+def _water_report(
+    matches: pd.DataFrame,
+    var_atlid: str,
+    var_orac: str,
+    strata_factory: Callable[[], dict[str, StratumFn | None]],
+    qc_modes: tuple[str, ...] = ("qc_off", "qc_strict", "qc_relaxed", "qc_mixed_phase"),
+) -> pd.DataFrame:
+    """Generic engine for cot_water / cer_water reports."""
+    base_mask = (
+        matches["valid_match"]
+        & (matches["cldmask_orac"] == 1)
+        & matches[var_atlid].notna()
+        & matches[var_orac].notna()
+    )
+    base = matches[base_mask].copy()
+
+    rows: list[pd.DataFrame] = []
+    for qc in qc_modes:
+        if qc not in SYNERGY_QC_MODES:
+            raise ValueError(f"Unknown qc_mode {qc!r}; known: {list(SYNERGY_QC_MODES)}")
+        qc_mask = SYNERGY_QC_MODES[qc](base).fillna(False)
+        sub = base[qc_mask]
+        if sub.empty:
+            continue
+        sample = dedupe_to_sample_water(sub)
+        pixel = aggregate_to_pixel_water(sub, var_atlid, var_orac)
+        s_stats = stratified_stats(sample, var_atlid, var_orac, strata=strata_factory())
+        p_stats = stratified_stats(pixel, var_atlid, var_orac, strata=strata_factory())
+        rows.append(s_stats.assign(qc_mode=qc, view="sample"))
+        rows.append(p_stats.assign(qc_mode=qc, view="pixel"))
+    if not rows:
+        return pd.DataFrame(columns=[
+            "qc_mode", "view", "stratum", "n", "bias", "rmse", "mae",
+            "r", "r_log", "slope", "intercept",
+        ])
+    return pd.concat(rows, ignore_index=True)
+
+
+def cot_water_report(matches: pd.DataFrame, **kw) -> pd.DataFrame:
+    """End-to-end water-cloud cot stats across QC modes × views × strata."""
+    return _water_report(matches, "cot_water_atlid", "cot_orac",
+                         cot_water_strata, **kw)
+
+
+def cer_water_report(matches: pd.DataFrame, **kw) -> pd.DataFrame:
+    """End-to-end water-cloud cer stats across QC modes × views × strata."""
+    return _water_report(matches, "cer_water_atlid", "cer_orac",
+                         cer_water_strata, **kw)
+
+
 def cth_strata(
     cth_atlid_col: str = "cth_atlid_thick_km",
     lat_col: str = "ec_lat",
@@ -308,6 +461,38 @@ def _qc_relaxed(d: pd.DataFrame) -> pd.Series:
 def _qc_no_trop_cap(d: pd.DataFrame) -> pd.Series:
     """Strict QS+confidence, no tropopause cap (exposes stratospheric tail)."""
     return (d["quality_status_atlid"] == 0) & (d["confidence_atlid"] >= 5)
+
+
+# ---------------------------------------------------------------------------
+# Synergy water-cloud QC modes (shared by cot_water and cer_water reports)
+# ---------------------------------------------------------------------------
+
+def _synergy_qc_off(d: pd.DataFrame) -> pd.Series:
+    """All cloudy-and-paired rows; no ACM-CAP QC restriction."""
+    return pd.Series(True, index=d.index)
+
+
+def _synergy_qc_strict(d: pd.DataFrame) -> pd.Series:
+    """``quality_status == 0`` AND ``liquid_only_atlid`` (no ice in column)."""
+    return (d["quality_status_atlid"] == 0) & d["liquid_only_atlid"].astype(bool)
+
+
+def _synergy_qc_relaxed(d: pd.DataFrame) -> pd.Series:
+    """``quality_status ∈ {0, 1}`` AND strict-liquid filter."""
+    return d["quality_status_atlid"].isin([0, 1]) & d["liquid_only_atlid"].astype(bool)
+
+
+def _synergy_qc_mixed_phase(d: pd.DataFrame) -> pd.Series:
+    """``quality_status == 0``, allow mixed-phase columns (no ice-free filter)."""
+    return d["quality_status_atlid"] == 0
+
+
+SYNERGY_QC_MODES: dict[str, Callable[[pd.DataFrame], pd.Series]] = {
+    "qc_off":          _synergy_qc_off,
+    "qc_strict":       _synergy_qc_strict,
+    "qc_relaxed":      _synergy_qc_relaxed,
+    "qc_mixed_phase":  _synergy_qc_mixed_phase,
+}
 
 
 CTH_QC_MODES: dict[str, Callable[[pd.DataFrame], pd.Series]] = {

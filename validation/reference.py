@@ -90,6 +90,81 @@ def cot_from_aebd(
     return cot, attenuated
 
 
+def cot_cer_water_from_accap(
+    liquid_optical_depth: np.ndarray,
+    liquid_extinction: np.ndarray,
+    liquid_eff_radius: np.ndarray,
+    liquid_classification: np.ndarray,
+    ice_water_content: np.ndarray,
+    height: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Per-profile water-cloud COT and CER from ACM-CAP, plus a strict-liquid flag.
+
+    No QC is applied — the matches CSV carries ``quality_status``,
+    ``convergence_status``, ``synergy_status``, ``cost_function``, and the
+    per-instrument assimilation statuses so QC choices are made as strata
+    at evaluate time.
+
+    Parameters
+    ----------
+    liquid_optical_depth
+        ``(n_profile,)`` ACM-CAP ``liquid_optical_depth`` (dimensionless,
+        NaN where fill). Used directly as the COT reference — no integral.
+    liquid_extinction
+        ``(n_profile, n_bin)`` per-bin ``liquid_extinction`` [m⁻¹], NaN fill.
+    liquid_eff_radius
+        ``(n_profile, n_bin)`` per-bin ``liquid_effective_radius`` [m].
+    liquid_classification
+        ``(n_profile, n_bin)`` int8: 0 none, 1 detected, 2 in-rain, 3 in-ice.
+        Only ``== 1`` bins (clean liquid) contribute to the τ-weighted CER.
+    ice_water_content
+        ``(n_profile, n_bin)`` per-bin ice [kg m⁻³], NaN fill.
+        Used to derive the strict-liquid flag.
+    height
+        ``(n_profile, n_bin)`` per-profile altitude grid in m (top-down).
+
+    Returns
+    -------
+    cot_water_atlid
+        ``(n_profile,)`` water-cloud τ (the ACM-CAP scalar).
+    cer_water_atlid
+        ``(n_profile,)`` τ-weighted mean effective radius in **µm**:
+        ``<r_eff> = Σ ext·r·dz / Σ ext·dz`` over clean-liquid bins.
+        NaN where the denominator is zero (no clean-liquid bins).
+        This is the active-side analogue of ORAC's passive Nakajima-King
+        retrieval, which weights toward the upper part of the cloud where
+        most of the optical depth sits.
+    liquid_only
+        ``(n_profile,)`` bool — True when there is liquid in the column
+        (``cot_water > 0``) and **no ice anywhere** (``IWC ≤ 0`` in every
+        bin). The strict water-cloud subset; mixed-phase profiles are
+        False.
+    """
+    cot = np.asarray(liquid_optical_depth, dtype=np.float64)
+
+    ext = np.where(np.isfinite(liquid_extinction), liquid_extinction, 0.0).astype(np.float64)
+    re_m = np.where(np.isfinite(liquid_eff_radius), liquid_eff_radius, 0.0).astype(np.float64)
+    h = np.where(np.isfinite(height), height, 0.0).astype(np.float64)
+    cls = np.asarray(liquid_classification)
+
+    # Per-bin |dz| from a top-down grid. Edge bins use forward difference.
+    dz = np.abs(np.diff(h, axis=1))
+    dz = np.concatenate([dz[:, :1], dz], axis=1)
+
+    clean_liquid = (cls == 1)
+    weight = np.where(clean_liquid, ext * dz, 0.0)
+    num = (weight * re_m).sum(axis=1)
+    den = weight.sum(axis=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        re_um = np.where(den > 0, (num / den) * 1.0e6, np.nan)
+
+    iwc = np.where(np.isfinite(ice_water_content), ice_water_content, 0.0)
+    has_ice = (iwc > 0).any(axis=1)
+    liquid_only = (cot > 0) & np.isfinite(cot) & ~has_ice
+
+    return cot, re_um, liquid_only
+
+
 def cth_from_acth(
     cth_thick: np.ndarray,
     cth_raw: np.ndarray,

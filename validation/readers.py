@@ -108,3 +108,74 @@ def read_acth_track(path: str | Path) -> dict:
         "tropopause_height_wmo": trop,
         "frame_id": path.stem.split("_")[-1],
     }
+
+
+def read_accap_track(path: str | Path) -> dict:
+    """Read an ACM_CAP_2B frame and return per-profile + per-bin fields.
+
+    Returns a dict with:
+
+    Per-profile (n_profile,):
+        lat, lon              : float64 [deg]
+        time                  : datetime64[ns]
+        liquid_optical_depth  : float64 — direct ACM-CAP liquid τ (no integration)
+        quality_status        : int8 — 0 good, 1 unconverged-but-usable,
+                                ≥2 partial obs failures, 9 convergence failed
+        convergence_status    : int8 — 0 converged, 1 empty, 2 max-iter, etc.
+        synergy_status        : int8 — 0 nominal, 1 active-only-failed, 2 passive-only,
+                                3 both, 4 mandatory failed
+        cost_function         : float64 — variational cost (continuous QC)
+        atlid_assim_status    : int8 — ATLID Mie backscatter assimilation
+                                (0 success, 1 not-attempted, 2 failed, 3 disabled)
+        cpr_assim_status      : int8 — CPR reflectivity assimilation (same codes)
+
+    Per-bin (n_profile, n_bin=242):
+        height                : float64 [m] — per-profile altitude grid
+        liquid_classification : int8 — 0 none, 1 detected, 2 in-rain, 3 in-ice
+        liquid_extinction     : float64 [m^-1] — per-bin liquid extinction
+        liquid_eff_radius     : float64 [m] — per-bin effective radius (× 1e6 → µm)
+        ice_water_content     : float64 [kg m^-3] — per-bin ice (NaN where fill)
+
+    plus ``frame_id``.
+    """
+    path = Path(path)
+    with h5py.File(path, "r") as f:
+        sd = f["ScienceData"]
+        lat = np.asarray(sd["latitude"][:], dtype=np.float64)
+        lon = np.asarray(sd["longitude"][:], dtype=np.float64)
+        t_sec = np.asarray(sd["time"][:], dtype=np.float64)
+        liq_od = _mask_fill(np.asarray(sd["liquid_optical_depth"][:]))
+        qs = np.asarray(sd["quality_status"][:], dtype=np.int8)
+        conv = np.asarray(sd["convergence_status"][:], dtype=np.int8)
+        syn = np.asarray(sd["synergy_status"][:], dtype=np.int8)
+        cost = _mask_fill(np.asarray(sd["cost_function"][:]))
+        atl_st = np.asarray(sd["ATLID_backscatter_mie_assimilation_status"][:], dtype=np.int8)
+        cpr_st = np.asarray(sd["CPR_reflectivity_factor_assimilation_status"][:], dtype=np.int8)
+
+        height = _mask_fill(np.asarray(sd["height"][:]))
+        liq_cls = np.asarray(sd["liquid_classification"][:], dtype=np.int8)
+        liq_ext = _mask_fill(np.asarray(sd["liquid_extinction"][:]))
+        liq_re = _mask_fill(np.asarray(sd["liquid_effective_radius"][:]))
+        iwc = _mask_fill(np.asarray(sd["ice_water_content"][:]))
+
+    t_sec_clean = np.where(np.isfinite(t_sec) & (t_sec < 1e30), t_sec, 0.0)
+    time = _TIME_EPOCH + (t_sec_clean * 1e9).astype("timedelta64[ns]")
+
+    return {
+        "lat": lat,
+        "lon": lon,
+        "time": time,
+        "liquid_optical_depth": liq_od,
+        "quality_status": qs,
+        "convergence_status": conv,
+        "synergy_status": syn,
+        "cost_function": cost,
+        "atlid_assim_status": atl_st,
+        "cpr_assim_status": cpr_st,
+        "height": height,
+        "liquid_classification": liq_cls,
+        "liquid_extinction": liq_ext,
+        "liquid_eff_radius": liq_re,
+        "ice_water_content": iwc,
+        "frame_id": path.stem.split("_")[-1],
+    }

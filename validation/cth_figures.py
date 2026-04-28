@@ -61,14 +61,18 @@ def _setup_axes(ax) -> None:
 
 
 def _density_image(ax, x: np.ndarray, y: np.ndarray,
+                   lim: tuple[float, float] = CTH_LIM,
                    bins: int = DENSITY_BINS, cmap: str = DENSITY_CMAP):
     """2D-histogram density on ``ax`` with `LogNorm` colour scale.
+
+    ``lim`` defines the axis range used both for the histogram domain
+    and the imshow extent.
 
     Returns the AxesImage handle so the caller can attach a colourbar.
     Counts of zero are masked → transparent (background shows through).
     """
     H, xedges, yedges = np.histogram2d(
-        x, y, bins=bins, range=[CTH_LIM, CTH_LIM]
+        x, y, bins=bins, range=[lim, lim]
     )
     H = H.T  # imshow expects (y, x)
     Hm = np.ma.masked_where(H == 0, H)
@@ -94,12 +98,15 @@ def _attach_colorbar(fig, ax, im, label: str = "count"):
 
 
 def _stat_text(ax, n: int, bias: float, rmse: float, r: float, *,
+               unit: str = "km",
                loc: tuple[float, float] = (0.04, 0.96)) -> None:
-    """Stats annotation in the upper-left of ``ax``."""
+    """Stats annotation in the upper-left of ``ax``. ``unit`` is appended to
+    bias/RMSE when truthy; pass ``unit=""`` for dimensionless variables."""
+    suffix = f" {unit}" if unit else ""
     txt = (
         f"$N$ = {n:,}\n"
-        f"bias = {bias:+.2f} km\n"
-        f"RMSE = {rmse:.2f} km\n"
+        f"bias = {bias:+.2f}{suffix}\n"
+        f"RMSE = {rmse:.2f}{suffix}\n"
         f"$R$ = {r:.2f}"
     )
     ax.text(

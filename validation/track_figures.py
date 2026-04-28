@@ -372,35 +372,41 @@ def track_panel_synergy(
     ax_curt = fig.add_subplot(gs[1])
     ALT_GRID = np.arange(ATLID_VERTICAL_KM[0], ATLID_VERTICAL_KM[1] + 0.05, 0.1)
     h_km = height / 1000.0
+    # Per-bin ice-cloud mask: ACM-CAP `liquid_classification == 3` means the
+    # bin was detected as cloud AND the liquid retrieval flagged it as inside
+    # an ice region. This is much tighter than `IWC > 0`, which leaks into
+    # non-cloud bins (drizzle / precip) that aren't ice cloud at all
+    # (≈80% of IWC>0 bins have liquid_classification == 0 / "none").
+    liq_cls = track["liquid_classification"][order]  # (n_profile, n_bin)
+    ice_cloud = (liq_cls == 3)
+
     grid_liq = np.full((len(ALT_GRID) - 1, len(along)), np.nan)
-    grid_ice = np.full((len(ALT_GRID) - 1, len(along)), np.nan)
+    grid_ice = np.zeros((len(ALT_GRID) - 1, len(along)), dtype=bool)
     for i in range(len(along)):
         valid_h = np.isfinite(h_km[i])
         if not valid_h.any():
             continue
         h_i = h_km[i][valid_h]
         e_i = liq_ext[i][valid_h]
-        iwc_i = iwc[i][valid_h]
+        ice_i = ice_cloud[i][valid_h]
         sort = np.argsort(h_i)
-        h_i, e_i, iwc_i = h_i[sort], e_i[sort], iwc_i[sort]
+        h_i, e_i, ice_i = h_i[sort], e_i[sort], ice_i[sort]
         for j in range(len(ALT_GRID) - 1):
             mask = (h_i >= ALT_GRID[j]) & (h_i < ALT_GRID[j + 1])
             if mask.any():
                 vals_e = e_i[mask][np.isfinite(e_i[mask]) & (e_i[mask] > 0)]
                 if len(vals_e):
                     grid_liq[j, i] = vals_e.mean()
-                vals_iwc = iwc_i[mask][np.isfinite(iwc_i[mask]) & (iwc_i[mask] > 0)]
-                if len(vals_iwc):
-                    grid_ice[j, i] = vals_iwc.mean()
+                if ice_i[mask].any():
+                    grid_ice[j, i] = True
 
-    # Background ice mask — translucent grey fill where ice is present at
-    # any altitude. Subtle so it doesn't compete with the liquid extinction
-    # signal but still tells you "this column has ice".
-    has_ice = np.isfinite(grid_ice) & (grid_ice > 1e-7)
-    if has_ice.any():
-        ax_curt.contourf(along, ALT_GRID[:-1], has_ice.astype(float),
+    # Background ice-cloud mask via liquid_classification == 3 ("in ice"),
+    # the bin-level flag for "detected as cloud and inside an ice region".
+    # Drawn as a translucent grey fill behind the liquid extinction layer.
+    if grid_ice.any():
+        ax_curt.contourf(along, ALT_GRID[:-1], grid_ice.astype(float),
                          levels=[0.5, 1.5], colors=["0.55"],
-                         alpha=0.18, zorder=1)
+                         alpha=0.20, zorder=1)
     pcm2 = ax_curt.pcolormesh(along, ALT_GRID[:-1], grid_liq, cmap="Blues",
                               norm=LIQ_EXT_NORM, shading="auto",
                               rasterized=True, zorder=2)
@@ -409,7 +415,8 @@ def track_panel_synergy(
     ax_curt.set_xlabel("along-track distance [km]")
     ax_curt.set_ylabel("altitude [km]")
     ax_curt.set_title(
-        "ACM-CAP liquid extinction (blue); ice-present columns (grey shade)",
+        "ACM-CAP liquid extinction (blue); ice-cloud bins via "
+        r"liquid_classification == 3 (grey)",
         fontsize=10)
 
     # ── Row 3: along-track ACM-CAP τ vs ORAC cot ────────────────────────

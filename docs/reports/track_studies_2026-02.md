@@ -143,7 +143,70 @@ R11 bias = −2.25, RMSE 9.02, R 0; R10 bias = −2.25, RMSE 9.02, R 0.12.
   orbits, not by every single Arctic case. This is exactly the kind of
   finding track studies surface that the population aggregate hides.
 
-### 2.5 North Atlantic mid-latitude — frame 09542B, 2026-02-01
+### 2.5 Southern Greenland with full ORAC overlap — frame 09588B, 2026-02-04
+
+![Southern Greenland — frame 09588B](../../figures/cot_water_2026-02_track_studies/track_09588B_greenland_R10_vs_R11.png)
+
+`figures/cot_water_2026-02_track_studies/track_09588B_greenland_R10_vs_R11.png` —
+all-orbit numbers: N_liquid_only = 2 695, R11 bias = −0.29, RMSE 26.58,
+R = −0.04; R10 bias = −0.65, RMSE 25.84.
+
+This case was added specifically to look at a Greenland orbit where ORAC
+*does* have substantial coverage — the 09539C case above passes over
+high-Arctic Greenland where SEVIRI is on the edge of its disk and most
+profiles are unretrieved. 09588B passes from ~ 70° N down through the
+southern tip of Greenland (~ 64° N) and continues into the North
+Atlantic, with dense ORAC coverage across the whole track and a clear
+land / ocean break right at the Greenland coast.
+
+- **Top map**: the track threads down the SE Greenland coast then
+  curves SW into the North Atlantic. Land and ocean are both well
+  sampled along the orbit (ORAC `lsflag` shows 39 land hits and 201
+  ocean hits inside the Greenland latitude / longitude box). 3 761
+  ATLID profiles are classified liquid-only (blue dots), with 1 080
+  clear and 163 mixed.
+- **Curtain**: a deep liquid layer between 2 and 8 km dominates the
+  ~ 1 200 – 2 200 km segment (which sits over the southern Greenland
+  coastal zone and the Denmark Strait). Outside that segment liquid is
+  thin and shallow.
+- **Bottom**: both R10 (cyan dashed) and R11 (orange) lock onto the
+  ACM-CAP trace (black) along most of the track within a factor of 2.
+
+Per-segment statistics inside the Greenland latitude / longitude box
+(60–83° N, 55–15° W):
+
+| segment            | N   | R10 bias | R10 RMSE | R11 bias | R11 RMSE |
+| ------------------ | --- | -------- | -------- | -------- | -------- |
+| all-Greenland      | 235 / 240 | −2.23 |  4.49 | +0.11 | 18.93 |
+| Greenland land     |  39 | −2.68 |  3.96 | −2.61 |  3.93 |
+| Greenland ocean    | 196 / 201 | −2.15 |  4.59 | +0.64 | 20.61 |
+| CPR-synergy subset | 193 | −2.79 |  4.89 | −2.68 |  4.83 |
+| ATLID-only subset  |  42 / 47 | +0.32 |  1.70 | **+11.58** | **41.64** |
+
+**The polar +18 bias does not reproduce here either**. Both streams sit
+near zero or slightly negative on the clean subsets (land, CPR-synergy):
+bias is between −2 and −3 with RMSE around 4–5 — i.e. ORAC is *under*-
+estimating ACM-CAP by ~ 2 over this Greenland scene, the opposite of
+the population polar signal.
+
+**A regime-specific R10-vs-R11 difference does emerge in the
+ATLID-only subset.** Where ACM-CAP has only the ATLID constraint
+(no CPR), R11 introduces a small population of high-bias outliers
+(+11.6 mean, RMSE 42) that R10 does not have (+0.3 mean, RMSE 1.7).
+The ATLID-only subset is the same population that drives the +10.1 bias
+in the all-month report; this orbit shows that R11 (not R10) is the
+contributor in this particular case.
+
+**Reading**: when ORAC has the geometry to retrieve cleanly over
+Greenland (mid-elevation southern coast, moderate solar zenith, dense
+SEVIRI coverage), it agrees with ACM-CAP within ~ 2 in liquid τ. The
+high polar bias in the aggregate is therefore a small-sample regime
+issue (high-Arctic, ATLID-only, weak-reference cases), not a
+fundamental ORAC failure over icy surfaces. R11 has a small population
+of ATLID-only-regime outliers that R10 does not — worth tracing to a
+specific change in the R11 prior or first-guess handling.
+
+### 2.6 North Atlantic mid-latitude — frame 09542B, 2026-02-01
 
 ![North Atlantic — frame 09542B](../../figures/cot_water_2026-02_track_studies/track_09542B_north-atlantic_R10_vs_R11.png)
 
@@ -162,7 +225,7 @@ R11 bias = +28.66, RMSE 77.92, R 0.04; R10 bias = +22.28, RMSE 66.90.
   liquid frontal cloud are the regime that pushes the population bias
   toward +30. R11 is +6 worse than R10 in this scene, opposite to 09865H.
 
-### 2.6 Other curated frames
+### 2.7 Other curated frames
 
 - **South America — 09543A** (`track_09543A_south-america_R10_vs_R11.png`)
   — bias R11 +0.10, R10 +0.57, RMSE 33–34. Equatorial South America
@@ -183,7 +246,7 @@ R11 bias = +28.66, RMSE 77.92, R 0.04; R10 bias = +22.28, RMSE 66.90.
   mixed-phase patches; the two streams disagree on whether the bias is
   positive or negative.
 
-### 2.7 Synergy case-study takeaways
+### 2.8 Synergy case-study takeaways
 
 1. **R10-vs-R11 ordering is not consistent per-orbit.** In some scenes
    R10 has the smaller bias (09865H, 09648H, 09885A); in others R11

@@ -35,7 +35,8 @@ from .statistics import (
     CTH_QC_MODES, SYNERGY_QC_MODES, aggregate_to_pixel, aggregate_to_pixel_cth,
     aggregate_to_pixel_water, cer_water_report, cer_water_strata,
     cot_report, cot_water_report, cot_water_strata, cth_report, cth_strata,
-    dedupe_to_sample, dedupe_to_sample_water, stratified_stats,
+    dedupe_to_sample, dedupe_to_sample_water, filter_water_sampling,
+    stratified_stats,
 )
 from .track_figures import track_panel
 
@@ -798,7 +799,11 @@ def _water_base_filter(d: pd.DataFrame, var_atlid: str, var_orac: str) -> pd.Ser
 def _cmd_water_evaluate(args, *, var_atlid, var_orac, report_fn) -> int:
     matches = _load_synergy_matches(args.matches)
     print(f"Concatenated {len(matches)} rows")
-    out = report_fn(matches)
+    out = report_fn(
+        matches,
+        min_n_liquid_only=args.min_n_liquid_only,
+        min_n_total=args.min_n_total,
+    )
     out_csv = Path(args.out)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     out.to_csv(out_csv, index=False)
@@ -831,8 +836,13 @@ def _cmd_water_figures(args, *, mode, var_atlid, var_orac, strata_fn, report_fn,
     headline = base[qc_mask]
     print(f"Base after qc='{args.qc_mode}': {len(headline)} rows "
           f"(from {len(base)} cloudy+finite, {len(matches)} raw)")
-    sample = dedupe_to_sample_water(headline)
-    pixel = aggregate_to_pixel_water(headline, var_atlid, var_orac)
+    headline_annotated, pixel = filter_water_sampling(
+        headline, var_atlid, var_orac,
+        min_n_liquid_only=args.min_n_liquid_only,
+        min_n_total=args.min_n_total,
+    )
+    sample = dedupe_to_sample_water(headline_annotated) if not headline_annotated.empty else headline_annotated
+    print(f"Sampling filter: n_liquid_only >= {args.min_n_liquid_only}, n_total >= {args.min_n_total}")
     print(f"Sample-level: {len(sample)}  Pixel-aggregate: {len(pixel)}")
 
     out_dir = Path(args.out); out_dir.mkdir(parents=True, exist_ok=True)
@@ -859,7 +869,11 @@ def _cmd_water_figures(args, *, mode, var_atlid, var_orac, strata_fn, report_fn,
         title=f"{suptitle} — R by stratum (pixel)",
         out=out_dir / f"{prefix}_r_by_stratum_pixel.png")
 
-    qc_stats = report_fn(matches)
+    qc_stats = report_fn(
+        matches,
+        min_n_liquid_only=args.min_n_liquid_only,
+        min_n_total=args.min_n_total,
+    )
     water_cloud_figures.qc_sensitivity_panel(
         qc_stats, title=f"{suptitle.split(' (')[0]} — QC sensitivity",
         out=out_dir / f"{prefix}_qc_sensitivity.png")
@@ -893,10 +907,21 @@ def _cmd_water_compare(args, *, mode, var_atlid, var_orac, strata_fn, prefix) ->
                        & qc_fn(raw_r11).fillna(False)].copy()
     print(f"R10 after qc='{args.qc_mode}': {len(base_r10)}  R11: {len(base_r11)}")
 
-    sample_r10 = dedupe_to_sample_water(base_r10)
-    sample_r11 = dedupe_to_sample_water(base_r11)
-    pixel_r10 = aggregate_to_pixel_water(base_r10, var_atlid, var_orac)
-    pixel_r11 = aggregate_to_pixel_water(base_r11, var_atlid, var_orac)
+    ann_r10, pixel_r10 = filter_water_sampling(
+        base_r10, var_atlid, var_orac,
+        min_n_liquid_only=args.min_n_liquid_only,
+        min_n_total=args.min_n_total,
+    )
+    ann_r11, pixel_r11 = filter_water_sampling(
+        base_r11, var_atlid, var_orac,
+        min_n_liquid_only=args.min_n_liquid_only,
+        min_n_total=args.min_n_total,
+    )
+    sample_r10 = dedupe_to_sample_water(ann_r10) if not ann_r10.empty else ann_r10
+    sample_r11 = dedupe_to_sample_water(ann_r11) if not ann_r11.empty else ann_r11
+    print(f"Sampling filter: n_liquid_only >= {args.min_n_liquid_only}, n_total >= {args.min_n_total}")
+    print(f"R10 retained: sample={len(sample_r10)} pixel={len(pixel_r10)}  "
+          f"R11 retained: sample={len(sample_r11)} pixel={len(pixel_r11)}")
 
     out_dir = Path(args.out); out_dir.mkdir(parents=True, exist_ok=True)
     suptitle = args.label or f"{prefix} validation R10 vs R11 ({args.qc_mode})"
@@ -1060,6 +1085,10 @@ def build_parser() -> argparse.ArgumentParser:
         ev.add_argument("--out", required=True, help="Output stats CSV path")
         ev.add_argument("--write-concat", action="store_true",
                         help="Also write concatenated matches CSV alongside.")
+        ev.add_argument("--min-n-liquid-only", type=int, default=1,
+                        help="Require at least this many liquid-only EarthCARE profiles in an ORAC pixel.")
+        ev.add_argument("--min-n-total", type=int, default=1,
+                        help="Require at least this many total EarthCARE profiles in an ORAC pixel.")
         ev.set_defaults(func=ev_fn)
 
         fg = sub.add_parser(f"{var}-figures", help=f"Make {var} figures.")
@@ -1071,6 +1100,10 @@ def build_parser() -> argparse.ArgumentParser:
         if var == "cot-water":
             fg.add_argument("--scale", default="log", choices=("log", "linear"),
                             help="COT scatter axis scale.")
+        fg.add_argument("--min-n-liquid-only", type=int, default=1,
+                        help="Require at least this many liquid-only EarthCARE profiles in an ORAC pixel.")
+        fg.add_argument("--min-n-total", type=int, default=1,
+                        help="Require at least this many total EarthCARE profiles in an ORAC pixel.")
         fg.add_argument("--label", default="", help="Title prefix")
         fg.set_defaults(func=fig_fn)
 
@@ -1085,6 +1118,10 @@ def build_parser() -> argparse.ArgumentParser:
         if var == "cot-water":
             cmp.add_argument("--scale", default="log", choices=("log", "linear"),
                              help="COT scatter axis scale.")
+        cmp.add_argument("--min-n-liquid-only", type=int, default=1,
+                         help="Require at least this many liquid-only EarthCARE profiles in an ORAC pixel.")
+        cmp.add_argument("--min-n-total", type=int, default=1,
+                         help="Require at least this many total EarthCARE profiles in an ORAC pixel.")
         cmp.add_argument("--label", default="", help="Title prefix")
         cmp.set_defaults(func=cmp_fn)
 

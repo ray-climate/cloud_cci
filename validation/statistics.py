@@ -293,6 +293,19 @@ def _composition_strata(phase_col: str = "phase_orac") -> dict[str, StratumFn]:
     }
 
 
+def _sampling_strata() -> dict[str, StratumFn]:
+    """Sub-pixel sampling / heterogeneity strata for pixel-aware experiments."""
+    return {
+        "n_liq_eq1":   lambda d: (d["n_liquid_only"] == 1) if "n_liquid_only" in d.columns else pd.Series(False, index=d.index),
+        "n_liq_eq2":   lambda d: (d["n_liquid_only"] == 2) if "n_liquid_only" in d.columns else pd.Series(False, index=d.index),
+        "n_liq_3_4":   lambda d: ((d["n_liquid_only"] >= 3) & (d["n_liquid_only"] <= 4)) if "n_liquid_only" in d.columns else pd.Series(False, index=d.index),
+        "n_liq_ge5":   lambda d: (d["n_liquid_only"] >= 5) if "n_liquid_only" in d.columns else pd.Series(False, index=d.index),
+        "het_cv_lt0p25":      lambda d: (d["ref_cv_atlid"] < 0.25) if "ref_cv_atlid" in d.columns else pd.Series(False, index=d.index),
+        "het_cv_0p25_0p75":   lambda d: ((d["ref_cv_atlid"] >= 0.25) & (d["ref_cv_atlid"] < 0.75)) if "ref_cv_atlid" in d.columns else pd.Series(False, index=d.index),
+        "het_cv_ge0p75":      lambda d: (d["ref_cv_atlid"] >= 0.75) if "ref_cv_atlid" in d.columns else pd.Series(False, index=d.index),
+    }
+
+
 def cot_water_strata(
     cot_atlid_col: str = "cot_water_atlid",
     lat_col: str = "ec_lat",
@@ -310,6 +323,7 @@ def cot_water_strata(
     """
     strata = _surface_strata(lsflag_col, lat_col, dist_col, tdiff_col)
     strata.update(_composition_strata(phase_col))
+    strata.update(_sampling_strata())
     strata.update({
         "tau_thin":       lambda d: (d[cot_atlid_col] >= 0.15) & (d[cot_atlid_col] < 1),
         "tau_mid":        lambda d: (d[cot_atlid_col] >= 1) & (d[cot_atlid_col] < 3),
@@ -332,6 +346,7 @@ def cer_water_strata(
     """
     strata = _surface_strata(lsflag_col, lat_col, dist_col, tdiff_col)
     strata.update(_composition_strata(phase_col))
+    strata.update(_sampling_strata())
     strata.update({
         "cer_small":  lambda d: d[cer_atlid_col] < 8,
         "cer_mid":    lambda d: (d[cer_atlid_col] >= 8) & (d[cer_atlid_col] < 16),
@@ -381,6 +396,9 @@ def aggregate_to_pixel_water(
     agg = {
         var_atlid: (var_atlid, "mean"),
         var_orac: (var_orac, "mean"),
+        "ref_std_atlid": (var_atlid, "std"),
+        "ref_min_atlid": (var_atlid, "min"),
+        "ref_max_atlid": (var_atlid, "max"),
         "n_total": (var_orac, "size"),
         "n_liquid_only": ("_n_liquid_only", "sum"),
         "n_mixed":       ("_n_mixed", "sum"),
@@ -402,6 +420,13 @@ def aggregate_to_pixel_water(
     out["frac_mixed"]       = out["n_mixed"] / n_total
     out["frac_ice_only"]    = out["n_ice_only"] / n_total
     out["frac_clear"]       = out["n_clear"] / n_total
+    out["ref_range_atlid"] = out["ref_max_atlid"] - out["ref_min_atlid"]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        out["ref_cv_atlid"] = np.where(
+            np.isfinite(out[var_atlid]) & (np.abs(out[var_atlid]) > 0),
+            out["ref_std_atlid"] / np.abs(out[var_atlid]),
+            np.nan,
+        )
     return out
 
 
@@ -414,12 +439,51 @@ def dedupe_to_sample_water(matches: pd.DataFrame) -> pd.DataFrame:
     return matches.loc[idx].reset_index(drop=True)
 
 
+def filter_water_sampling(
+    matches: pd.DataFrame,
+    var_atlid: str,
+    var_orac: str,
+    *,
+    min_n_liquid_only: int = 1,
+    min_n_total: int = 1,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Annotate raw matches with per-pixel sampling metadata and apply a pixel filter.
+
+    The filtered raw rows are suitable for ``dedupe_to_sample_water`` while the
+    second return value is the already-aggregated pixel table for the same set
+    of retained ORAC pixels.
+    """
+    pixel = aggregate_to_pixel_water(matches, var_atlid, var_orac)
+    if pixel.empty:
+        return matches.iloc[0:0].copy(), pixel
+
+    keep = (
+        (pixel["n_liquid_only"] >= min_n_liquid_only)
+        & (pixel["n_total"] >= min_n_total)
+    )
+    pixel = pixel[keep].reset_index(drop=True)
+    if pixel.empty:
+        return matches.iloc[0:0].copy(), pixel
+
+    meta_cols = [
+        "sev_scan_time", "sev_pixel_id",
+        "n_total", "n_liquid_only", "n_mixed", "n_ice_only", "n_clear",
+        "frac_liquid_only", "frac_mixed", "frac_ice_only", "frac_clear",
+        "ref_std_atlid", "ref_min_atlid", "ref_max_atlid",
+        "ref_range_atlid", "ref_cv_atlid",
+    ]
+    annotated = matches.merge(pixel[meta_cols], on=["sev_scan_time", "sev_pixel_id"], how="inner")
+    return annotated, pixel
+
+
 def _water_report(
     matches: pd.DataFrame,
     var_atlid: str,
     var_orac: str,
     strata_factory: Callable[[], dict[str, StratumFn | None]],
     qc_modes: tuple[str, ...] = ("qc_off", "qc_strict", "qc_relaxed"),
+    min_n_liquid_only: int = 1,
+    min_n_total: int = 1,
 ) -> pd.DataFrame:
     """Generic engine for cot_water / cer_water reports."""
     base_mask = (
@@ -438,8 +502,14 @@ def _water_report(
         sub = base[qc_mask]
         if sub.empty:
             continue
-        sample = dedupe_to_sample_water(sub)
-        pixel = aggregate_to_pixel_water(sub, var_atlid, var_orac)
+        annotated, pixel = filter_water_sampling(
+            sub, var_atlid, var_orac,
+            min_n_liquid_only=min_n_liquid_only,
+            min_n_total=min_n_total,
+        )
+        if annotated.empty or pixel.empty:
+            continue
+        sample = dedupe_to_sample_water(annotated)
         s_stats = stratified_stats(sample, var_atlid, var_orac, strata=strata_factory())
         p_stats = stratified_stats(pixel, var_atlid, var_orac, strata=strata_factory())
         rows.append(s_stats.assign(qc_mode=qc, view="sample"))

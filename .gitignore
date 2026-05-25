@@ -22,3 +22,17 @@ validation_data/
 
 # EarthCARE downloaded products (large, fetchable via earthcare CLI)
 earthcare_data/
+
+# Pipeline run logs (reproducible from CLI invocations)
+logs/
+
+# Orbit / colocation generated data (regenerable from the scripts in the same dirs)
+orbit/colocation/atlid_slstr3a_matches_*.csv
+orbit/colocation/atlid_slstr3b_matches_*.csv
+orbit/SLSTR/output/
+orbit/SLSTR/polygon_slstr3a/
+orbit/SLSTR/polygon_slstr3b/
+orbit/ATLID/atlid_sampled_positions.csv
+
+# Local Claude Code project config — not portable across machines
+.claude/

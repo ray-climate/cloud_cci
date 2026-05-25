@@ -36,7 +36,7 @@ from .statistics import (
     aggregate_to_pixel_water, cer_water_report, cer_water_strata,
     cot_report, cot_water_report, cot_water_strata, cth_report, cth_strata,
     dedupe_to_sample, dedupe_to_sample_water, filter_water_sampling,
-    stratified_stats,
+    homogeneity_sweep_stats, stratified_stats,
 )
 from .track_figures import track_panel
 
@@ -982,6 +982,65 @@ def cmd_cer_water_compare(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# homogeneity sweep
+# ---------------------------------------------------------------------------
+
+def _cmd_water_homogeneity(args, *, var_atlid: str, var_orac: str, prefix: str,
+                            r_metric: str = "r", r_label: str = "Pearson R") -> int:
+    n_cuts = tuple(int(x) for x in args.n_cuts)
+    cv_edges = tuple(float(x) for x in args.cv_edges)
+    out_dir = Path(args.out); out_dir.mkdir(parents=True, exist_ok=True)
+    qc_fn = SYNERGY_QC_MODES[args.qc_mode]
+
+    sources: list[tuple[str, str]] = []
+    if args.matches_r10:
+        sources.append(("R10", args.matches_r10))
+    if args.matches_r11:
+        sources.append(("R11", args.matches_r11))
+    if not sources:
+        print("Need at least --matches-r10 or --matches-r11", file=sys.stderr)
+        return 1
+
+    all_stats: list[pd.DataFrame] = []
+    for label, matches_glob in sources:
+        raw = _load_synergy_matches(matches_glob)
+        base = raw[_water_base_filter(raw, var_atlid, var_orac)
+                   & qc_fn(raw).fillna(False)].copy()
+        pixel = aggregate_to_pixel_water(base, var_atlid, var_orac)
+        print(f"{label}: raw={len(raw)} qc='{args.qc_mode}'={len(base)} "
+              f"pixel={len(pixel)}")
+
+        sweep = homogeneity_sweep_stats(
+            pixel, var_atlid, var_orac, n_cuts=n_cuts, cv_edges=cv_edges,
+        )
+        sweep_out = sweep.assign(retrieval=label, qc_mode=args.qc_mode)
+        all_stats.append(sweep_out)
+
+        suptitle = (args.label or f"{prefix} homogeneity sweep") + f" — {label} ({args.qc_mode})"
+        water_cloud_figures.homogeneity_sweep(
+            sweep, r_metric=r_metric, r_label=r_label,
+            title=suptitle,
+            out=out_dir / f"{prefix}_homogeneity_{label}.png",
+        )
+
+    stats = pd.concat(all_stats, ignore_index=True)
+    stats.to_csv(out_dir / f"{prefix}_homogeneity_stats.csv", index=False)
+    print(f"Wrote {len(sources)} PNG(s) and stats CSV to {out_dir}")
+    return 0
+
+
+def cmd_cot_water_homogeneity(args: argparse.Namespace) -> int:
+    return _cmd_water_homogeneity(args, var_atlid="cot_water_atlid",
+                                   var_orac="cot_orac", prefix="cot_water",
+                                   r_metric="r_log", r_label="Pearson R (log COT)")
+
+
+def cmd_cer_water_homogeneity(args: argparse.Namespace) -> int:
+    return _cmd_water_homogeneity(args, var_atlid="cer_water_atlid",
+                                   var_orac="cer_orac", prefix="cer_water")
+
+
+# ---------------------------------------------------------------------------
 # track-plot
 # ---------------------------------------------------------------------------
 
@@ -1075,9 +1134,9 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--out", required=True, help="Per-frame matches CSV directory")
     sc.set_defaults(func=cmd_synergy_collocate)
 
-    for var, ev_fn, fig_fn, cmp_fn in (
-        ("cot-water", cmd_cot_water_evaluate, cmd_cot_water_figures, cmd_cot_water_compare),
-        ("cer-water", cmd_cer_water_evaluate, cmd_cer_water_figures, cmd_cer_water_compare),
+    for var, ev_fn, fig_fn, cmp_fn, hom_fn in (
+        ("cot-water", cmd_cot_water_evaluate, cmd_cot_water_figures, cmd_cot_water_compare, cmd_cot_water_homogeneity),
+        ("cer-water", cmd_cer_water_evaluate, cmd_cer_water_figures, cmd_cer_water_compare, cmd_cer_water_homogeneity),
     ):
         ev = sub.add_parser(f"{var}-evaluate",
                             help=f"Concatenate synergy matches CSVs + write {var} stats.")
@@ -1124,6 +1183,26 @@ def build_parser() -> argparse.ArgumentParser:
                          help="Require at least this many total EarthCARE profiles in an ORAC pixel.")
         cmp.add_argument("--label", default="", help="Title prefix")
         cmp.set_defaults(func=cmp_fn)
+
+        hom = sub.add_parser(
+            f"{var}-homogeneity",
+            help=f"Sweep {var} agreement across homogeneity bins for n>=1, 3, 5 sample cuts.",
+        )
+        hom.add_argument("--matches-r10", default="",
+                         help="Glob over R10 synergy matches CSVs (optional)")
+        hom.add_argument("--matches-r11", default="",
+                         help="Glob over R11 synergy matches CSVs (optional)")
+        hom.add_argument("--out", required=True, help="Output figure directory")
+        hom.add_argument("--qc-mode", default="qc_strict",
+                         choices=tuple(SYNERGY_QC_MODES),
+                         help="QC base filter applied before pixel aggregation.")
+        hom.add_argument("--n-cuts", nargs="+", type=int, default=[1, 3, 5],
+                         help="Minimum-n_liquid_only cuts to overlay.")
+        hom.add_argument("--cv-edges", nargs="+", type=float,
+                         default=[0.0, 0.25, 0.75, float("inf")],
+                         help="ref_cv_atlid bin edges.")
+        hom.add_argument("--label", default="", help="Title prefix")
+        hom.set_defaults(func=hom_fn)
 
     cmpcth = sub.add_parser("cth-compare", help="R10 vs R11 ORAC retrieval comparison for CTH.")
     cmpcth.add_argument("--matches-r10", required=True, help="Glob over R10 cth matches CSVs")

@@ -297,3 +297,55 @@ def qc_sensitivity_panel(
         fig.suptitle(title, fontsize=12)
     fig.tight_layout()
     return _save(fig, out)
+
+
+def homogeneity_sweep(
+    sweep_stats: pd.DataFrame, *,
+    r_metric: str = "r",
+    r_label: str = "Pearson R",
+    title: str = "",
+    out: str | Path | None = None,
+) -> plt.Figure:
+    """1x3 panel of bias / RMSE / correlation as a function of homogeneity bin.
+
+    One curve per ``n_cut`` (minimum liquid-only ATLID profiles per ORAC
+    pixel). The input is the table produced by
+    :func:`validation.statistics.homogeneity_sweep_stats`. For heavy-tailed
+    quantities like COT, pass ``r_metric="r_log"`` so the third panel shows
+    the log-space correlation that is not dominated by a few extreme points.
+    """
+    d = sweep_stats.copy()
+    bin_order = d.sort_values("cv_lo")["cv_bin"].drop_duplicates().tolist()
+    n_cuts = sorted(d["n_cut"].unique().tolist())
+
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4.6))
+    cmap = plt.get_cmap("viridis")
+    colors = [cmap(0.15 + 0.7 * i / max(len(n_cuts) - 1, 1)) for i in range(len(n_cuts))]
+
+    for metric, ax, ylabel in [
+        ("bias",   axes[0], "bias (ORAC − ATLID)"),
+        ("rmse",   axes[1], "RMSE"),
+        (r_metric, axes[2], r_label),
+    ]:
+        for n_cut, color in zip(n_cuts, colors):
+            sub = (d[d["n_cut"] == n_cut]
+                   .set_index("cv_bin").reindex(bin_order).reset_index())
+            ax.plot(bin_order, sub[metric].values,
+                    marker="o", color=color, lw=1.8,
+                    label=f"n ≥ {n_cut}")
+            for i, (val, n) in enumerate(zip(sub[metric].values, sub["n"].values)):
+                if np.isfinite(val) and pd.notna(n) and n > 0:
+                    ax.annotate(f"N={int(n)}", xy=(i, val), xytext=(0, 6),
+                                textcoords="offset points",
+                                ha="center", fontsize=7, color=color)
+        ax.set_xlabel("homogeneity (ref_cv_atlid bin)")
+        ax.set_ylabel(ylabel)
+        if metric == "bias":
+            ax.axhline(0, color="0.3", lw=0.7)
+        ax.grid(alpha=0.3)
+
+    axes[0].legend(loc="best", fontsize=9, frameon=False)
+    if title:
+        fig.suptitle(title, fontsize=12)
+    fig.tight_layout()
+    return _save(fig, out)

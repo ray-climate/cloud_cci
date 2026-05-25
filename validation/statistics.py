@@ -476,6 +476,46 @@ def filter_water_sampling(
     return annotated, pixel
 
 
+def homogeneity_sweep_stats(
+    pixel: pd.DataFrame,
+    var_atlid: str,
+    var_orac: str,
+    *,
+    n_cuts: Sequence[int] = (1, 3, 5),
+    cv_edges: Sequence[float] = (0.0, 0.25, 0.75, float("inf")),
+) -> pd.DataFrame:
+    """Stratify a pixel-aggregate table by (n_liquid_only cut, homogeneity bin).
+
+    For each ``min_n_liquid_only`` threshold in ``n_cuts`` and each
+    ``ref_cv_atlid`` bin in ``cv_edges``, compute bias / RMSE / MAE / R / N
+    using :func:`continuous_stats`. Pixels with non-finite ``ref_cv_atlid``
+    are dropped (single-profile pixels with zero std).
+    """
+    rows: list[dict] = []
+    base = pixel.dropna(subset=[var_atlid, var_orac, "ref_cv_atlid", "n_liquid_only"]).copy()
+    edges = list(cv_edges)
+    for n_cut in n_cuts:
+        sub = base[base["n_liquid_only"] >= n_cut]
+        for lo, hi in zip(edges[:-1], edges[1:]):
+            bin_label = _format_cv_bin(lo, hi)
+            cell = sub[(sub["ref_cv_atlid"] >= lo) & (sub["ref_cv_atlid"] < hi)]
+            stats = continuous_stats(cell, var_atlid, var_orac)
+            rows.append({
+                "n_cut": int(n_cut),
+                "cv_bin": bin_label,
+                "cv_lo": float(lo),
+                "cv_hi": float(hi),
+                **stats,
+            })
+    return pd.DataFrame(rows)
+
+
+def _format_cv_bin(lo: float, hi: float) -> str:
+    def _fmt(x: float) -> str:
+        return "inf" if not np.isfinite(x) else (f"{x:g}")
+    return f"[{_fmt(lo)},{_fmt(hi)})"
+
+
 def _water_report(
     matches: pd.DataFrame,
     var_atlid: str,

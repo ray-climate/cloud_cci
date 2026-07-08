@@ -24,6 +24,9 @@ from pathlib import Path
 import pandas as pd
 
 from .collocate import match_track_to_seviri, open_seviri_at_matches
+from .collocate_slstr import (
+    GranuleCatalog, build_granule_catalog, match_track_to_slstr,
+)
 from .figures import bias_by_stratum, diagnostic_panel, scatter_panel
 from .readers import read_aebd_track, read_accap_track, read_acth_track
 from .reference import cot_cer_water_from_accap, cot_from_aebd, cth_from_acth
@@ -50,6 +53,11 @@ ORAC_COT_SATURATION = 100.0
 DEFAULT_RETRIEVAL = "R11"
 EARTHCARE_ROOT = Path("earthcare_data")
 SEVIRI_ROOT_DEFAULT = Path("/gws/ssde/j25a/cloud_ecv/data_out/seviri")
+SLSTR_ROOT_DEFAULT = Path(
+    "/gws/ssde/j25a/cloud_ecv/data_out/slstr/v5.1_new_snowice/slstra/l2b"
+)
+SLSTR_DEFAULT_MAX_DT_MIN = 30.0
+SLSTR_CATALOG_CACHE = Path("validation_data/_slstr_catalog")
 FRAME_RE = re.compile(r"_(\d{8}T\d{6}Z)_(\d{8}T\d{6}Z)_(\w+)\.h5$")
 
 
@@ -405,6 +413,258 @@ def cmd_synergy_collocate(args: argparse.Namespace) -> int:
         print(f"  [{i:4d}/{len(frames)}] {marker} {fid:>8} → {status}")
     print(f"Summary: {counts}")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# SLSTR collocation (polar-orbiter swath — EarthCARE driver → SLSTR granule)
+#
+# Mirrors the SEVIRI cth / synergy / cot paths but uses ``match_track_to_slstr``
+# (temporal-gated, crossing-limited). The output CSVs use the SAME column names
+# as the SEVIRI matches, so cth-evaluate / cot-water-* / figures consume them
+# unchanged. Two extra columns travel through: ``illum_orac`` (1 day / 2 twilight
+# / 3 night) and ``sza_orac`` (solar zenith) — COT must be day-filtered because
+# ORAC's solar retrieval defaults to a constant prior at night.
+# ---------------------------------------------------------------------------
+
+_SLSTR_CTH_VARS = ("cth", "cth_corrected", "cth_uncertainty",
+                   "cth_corrected_uncertainty", "cldmask", "lsflag", "phase",
+                   "illum", "solar_zenith_view_no1")
+_SLSTR_SYNERGY_VARS = ("cot", "cer", "cldmask", "lsflag", "phase",
+                       "illum", "solar_zenith_view_no1")
+_SLSTR_COT_VARS = ("cot", "cldmask", "lsflag", "phase",
+                   "illum", "solar_zenith_view_no1")
+_SLSTR_ORAC_RENAME = {
+    "cldmask": "cldmask_orac", "lsflag": "lsflag_orac", "phase": "phase_orac",
+    "illum": "illum_orac", "solar_zenith_view_no1": "sza_orac",
+}
+
+
+def _load_or_build_slstr_catalog(
+    slstr_root: Path, start: datetime, end: datetime, max_dt_s: float
+) -> GranuleCatalog:
+    """Build (and disk-cache) the corner-sampled granule catalogue for a run.
+
+    The catalogue is expensive (a strided lat/lon read per granule) but shared
+    across every frame and every product, so it is pickled under
+    ``SLSTR_CATALOG_CACHE`` keyed by (root, window).
+    """
+    import pickle
+    from datetime import timedelta
+
+    from orac.slstr import discover_granules
+
+    pad = timedelta(seconds=max_dt_s + 300)
+    win_lo, win_hi = start - pad, end + pad
+    key = f"{abs(hash((str(slstr_root), win_lo.isoformat(), win_hi.isoformat()))):x}"
+    cache = SLSTR_CATALOG_CACHE.with_name(SLSTR_CATALOG_CACHE.name + f"_{key}.pkl")
+    if cache.exists():
+        with open(cache, "rb") as fh:
+            cat = pickle.load(fh)
+        print(f"Loaded granule catalogue ({len(cat.granules)} granules) from {cache}")
+        return cat
+
+    granules = discover_granules(slstr_root, win_lo, win_hi)
+    print(f"Building granule catalogue over {len(granules)} SLSTR granules "
+          f"in [{win_lo:%Y-%m-%d %H:%M}, {win_hi:%Y-%m-%d %H:%M}] ...")
+    cat = build_granule_catalog(granules)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    with open(cache, "wb") as fh:
+        pickle.dump(cat, fh)
+    print(f"  → cached to {cache} ({len(cat.granules)} usable granules)")
+    return cat
+
+
+def _process_frame_cth_slstr(
+    path: Path, catalog: GranuleCatalog, slstr_root: Path, max_dt_s: float, out_dir: Path
+) -> tuple[Path | None, str]:
+    """Match one A-CTH frame to SLSTR ORAC; write matches_cth_<frame_id>.csv."""
+    meta = _frame_metadata(path)
+    if meta is None:
+        return None, "fail"
+    fid = meta[0]
+    out_csv = out_dir / f"matches_cth_{fid}.csv"
+    if out_csv.exists() and out_csv.stat().st_size > 0:
+        return out_csv, "skip"
+    try:
+        track = read_acth_track(path)
+    except Exception as e:  # noqa: BLE001
+        print(f"  [{fid}] read failed: {e}", file=sys.stderr)
+        return None, "fail"
+
+    cth_thick_km, cth_raw_km = cth_from_acth(track["cth_thick"], track["cth_raw"])
+    try:
+        matches = match_track_to_slstr(
+            track["lat"], track["lon"], track["time"], slstr_root,
+            orac_vars=_SLSTR_CTH_VARS, max_time_diff_seconds=max_dt_s,
+            catalog=catalog,
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"  [{fid}] match failed ({type(e).__name__}): {e}", file=sys.stderr)
+        return None, "fail"
+
+    matches["cth_atlid_thick_km"] = cth_thick_km
+    matches["cth_atlid_raw_km"] = cth_raw_km
+    matches["quality_status_atlid"] = track["quality_status"]
+    matches["confidence_atlid"] = track["cth_confidence"]
+    matches["cloud_class_atlid"] = track["cloud_class"]
+    matches["tropopause_km_atlid"] = track["tropopause_height_wmo"] / 1000.0
+    matches["frame_id"] = fid
+    if not matches["valid_match"].any():
+        return None, "empty"
+
+    matches = matches.rename(columns={
+        "cth": "cth_orac_km", "cth_corrected": "cth_orac_corrected_km",
+        "cth_uncertainty": "cth_orac_uncertainty_km",
+        "cth_corrected_uncertainty": "cth_orac_corrected_uncertainty_km",
+        **_SLSTR_ORAC_RENAME,
+    })
+    out_dir.mkdir(parents=True, exist_ok=True)
+    matches.to_csv(out_csv, index=False)
+    return out_csv, "done"
+
+
+def _process_frame_synergy_slstr(
+    path: Path, catalog: GranuleCatalog, slstr_root: Path, max_dt_s: float, out_dir: Path
+) -> tuple[Path | None, str]:
+    """Match one ACM-CAP frame to SLSTR ORAC; write matches_synergy_<frame_id>.csv."""
+    meta = _frame_metadata(path)
+    if meta is None:
+        return None, "fail"
+    fid = meta[0]
+    out_csv = out_dir / f"matches_synergy_{fid}.csv"
+    if out_csv.exists() and out_csv.stat().st_size > 0:
+        return out_csv, "skip"
+    try:
+        track = read_accap_track(path)
+    except Exception as e:  # noqa: BLE001
+        print(f"  [{fid}] read failed: {e}", file=sys.stderr)
+        return None, "fail"
+
+    cot_w, cer_w, liq_present, ice_present = cot_cer_water_from_accap(
+        track["liquid_optical_depth"], track["liquid_extinction"],
+        track["liquid_eff_radius"], track["liquid_classification"],
+        track["ice_water_content"], track["height"],
+    )
+    try:
+        matches = match_track_to_slstr(
+            track["lat"], track["lon"], track["time"], slstr_root,
+            orac_vars=_SLSTR_SYNERGY_VARS, max_time_diff_seconds=max_dt_s,
+            catalog=catalog,
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"  [{fid}] match failed ({type(e).__name__}): {e}", file=sys.stderr)
+        return None, "fail"
+
+    matches["cot_water_atlid"] = cot_w
+    matches["cer_water_atlid"] = cer_w
+    matches["liquid_present_atlid"] = liq_present
+    matches["ice_present_atlid"] = ice_present
+    matches["liquid_only_atlid"] = liq_present & ~ice_present
+    matches["quality_status_atlid"] = track["quality_status"]
+    matches["convergence_status_atlid"] = track["convergence_status"]
+    matches["synergy_status_atlid"] = track["synergy_status"]
+    matches["cost_function_atlid"] = track["cost_function"]
+    matches["atlid_assim_status"] = track["atlid_assim_status"]
+    matches["cpr_assim_status"] = track["cpr_assim_status"]
+    matches["frame_id"] = fid
+    if not matches["valid_match"].any():
+        return None, "empty"
+
+    matches = matches.rename(columns={
+        "cot": "cot_orac", "cer": "cer_orac", **_SLSTR_ORAC_RENAME,
+    })
+    out_dir.mkdir(parents=True, exist_ok=True)
+    matches.to_csv(out_csv, index=False)
+    return out_csv, "done"
+
+
+def _process_frame_cot_slstr(
+    path: Path, catalog: GranuleCatalog, slstr_root: Path, max_dt_s: float, out_dir: Path
+) -> tuple[Path | None, str]:
+    """Match one A-EBD frame to SLSTR ORAC (ice cot); write matches_cot_<frame_id>.csv."""
+    meta = _frame_metadata(path)
+    if meta is None:
+        return None, "fail"
+    fid = meta[0]
+    out_csv = out_dir / f"matches_cot_{fid}.csv"
+    if out_csv.exists() and out_csv.stat().st_size > 0:
+        return out_csv, "skip"
+    try:
+        track = read_aebd_track(path)
+    except Exception as e:  # noqa: BLE001
+        print(f"  [{fid}] read failed: {e}", file=sys.stderr)
+        return None, "fail"
+
+    cot, attenuated = cot_from_aebd(
+        track["extinction"], track["height"], track["quality_status"]
+    )
+    try:
+        matches = match_track_to_slstr(
+            track["lat"], track["lon"], track["time"], slstr_root,
+            orac_vars=_SLSTR_COT_VARS, max_time_diff_seconds=max_dt_s,
+            catalog=catalog,
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"  [{fid}] match failed ({type(e).__name__}): {e}", file=sys.stderr)
+        return None, "fail"
+
+    matches["cot_atlid"] = cot
+    matches["attenuated"] = attenuated
+    matches["frame_id"] = fid
+    if not matches["valid_match"].any():
+        return None, "empty"
+
+    matches = matches.rename(columns={"cot": "cot_orac", **_SLSTR_ORAC_RENAME})
+    matches["cot_orac_saturated"] = matches["cot_orac"] >= ORAC_COT_SATURATION
+    out_dir.mkdir(parents=True, exist_ok=True)
+    matches.to_csv(out_csv, index=False)
+    return out_csv, "done"
+
+
+def _run_slstr_collocate(args: argparse.Namespace, driver: str, processor) -> int:
+    start = datetime.fromisoformat(args.start.replace("Z", "+00:00"))
+    end = datetime.fromisoformat(args.end.replace("Z", "+00:00"))
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    max_dt_s = args.max_time_diff_min * 60.0
+    slstr_root = Path(args.slstr_root)
+
+    frames = _enumerate_frames(driver, start, end)
+    print(f"Found {len(frames)} {driver} frames in [{start}, {end})")
+    if not frames:
+        return 0
+
+    catalog = _load_or_build_slstr_catalog(slstr_root, start, end, max_dt_s)
+    if not catalog.granules:
+        print("No SLSTR granules in the run window — nothing to match.", file=sys.stderr)
+        return 1
+
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    counts = {"done": 0, "skip": 0, "empty": 0, "fail": 0}
+    for i, path in enumerate(frames, 1):
+        meta = _frame_metadata(path)
+        fid = meta[0] if meta else "?"
+        _, status = processor(path, catalog, slstr_root, max_dt_s, out_dir)
+        counts[status] += 1
+        marker = {"done": "✓", "skip": "·", "empty": "○", "fail": "✗"}[status]
+        print(f"  [{i:4d}/{len(frames)}] {marker} {fid:>8} → {status}")
+    print(f"Summary: {counts}")
+    return 0
+
+
+def cmd_slstr_cth_collocate(args: argparse.Namespace) -> int:
+    return _run_slstr_collocate(args, "A-CTH", _process_frame_cth_slstr)
+
+
+def cmd_slstr_synergy_collocate(args: argparse.Namespace) -> int:
+    return _run_slstr_collocate(args, "ACM-CAP", _process_frame_synergy_slstr)
+
+
+def cmd_slstr_collocate(args: argparse.Namespace) -> int:
+    return _run_slstr_collocate(args, "A-EBD", _process_frame_cot_slstr)
 
 
 # ---------------------------------------------------------------------------
@@ -1133,6 +1393,25 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--retrieval", default=DEFAULT_RETRIEVAL, choices=("R10", "R11"))
     sc.add_argument("--out", required=True, help="Per-frame matches CSV directory")
     sc.set_defaults(func=cmd_synergy_collocate)
+
+    # SLSTR collocation (polar-orbiter swath). Same output schema as SEVIRI, so
+    # cth-evaluate / cot-water-* / figures consume the CSVs unchanged.
+    for name, fn, helptext in (
+        ("slstr-cth-collocate", cmd_slstr_cth_collocate,
+         "Match A-CTH frames to SLSTR ORAC (temporal-gated crossing match)."),
+        ("slstr-synergy-collocate", cmd_slstr_synergy_collocate,
+         "Match ACM-CAP frames to SLSTR ORAC (cot+cer water references)."),
+        ("slstr-collocate", cmd_slstr_collocate,
+         "Match A-EBD frames to SLSTR ORAC (ice cot reference)."),
+    ):
+        sp = sub.add_parser(name, help=helptext)
+        sp.add_argument("--start", required=True, help="ISO start, e.g. 2025-12-01")
+        sp.add_argument("--end", required=True, help="ISO end (exclusive)")
+        sp.add_argument("--slstr-root", default=str(SLSTR_ROOT_DEFAULT))
+        sp.add_argument("--max-time-diff-min", type=float, default=SLSTR_DEFAULT_MAX_DT_MIN,
+                        help="Temporal match tolerance in minutes (default 30).")
+        sp.add_argument("--out", required=True, help="Per-frame matches CSV directory")
+        sp.set_defaults(func=fn)
 
     for var, ev_fn, fig_fn, cmp_fn, hom_fn in (
         ("cot-water", cmd_cot_water_evaluate, cmd_cot_water_figures, cmd_cot_water_compare, cmd_cot_water_homogeneity),

@@ -70,7 +70,7 @@ def _setup_log_axes(ax) -> None:
     ax.set_aspect("equal", adjustable="box")
     ax.tick_params(direction="in", top=True, right=True, length=4)
     ax.set_xlabel(r"ATLID column $\tau_{355}$")
-    ax.set_ylabel("ORAC SEVIRI cot")
+    ax.set_ylabel("ORAC cot")
     ax.plot(LOG_LIM, LOG_LIM, color="0.2", lw=0.9, ls="--", zorder=3)
 
 

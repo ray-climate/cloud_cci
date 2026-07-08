@@ -54,7 +54,7 @@ def _setup_axes(ax) -> None:
     ax.set_aspect("equal", adjustable="box")
     ax.tick_params(direction="in", top=True, right=True, length=4)
     ax.set_xlabel(r"ATLID cloud top height [km]")
-    ax.set_ylabel(r"ORAC SEVIRI $\mathrm{cth_{corrected}}$ [km]")
+    ax.set_ylabel(r"ORAC $\mathrm{cth_{corrected}}$ [km]")
     # 1:1 line drawn on top of the density / scatter layers (zorder 2) so
     # the reference is visible across the dense ridge.
     ax.plot(CTH_LIM, CTH_LIM, color="0.2", lw=0.9, ls="--", zorder=3)
@@ -166,12 +166,19 @@ def diagnostic_panel(
     d = sample[cols].dropna(subset=[x, y])
     xv, yv = d[x].values, d[y].values
 
+    # Time-offset colour scale adapts to the collocation window: SEVIRI uses a
+    # 7.5-min (450 s) tolerance, but the polar-orbiter SLSTR crossings run to
+    # tens of minutes. Cap at the 99th percentile (>=450 s so SEVIRI is unchanged).
+    tdiff = d["time_diff_s"].values
+    tdiff_vmax = 450.0
+    if np.isfinite(tdiff).any():
+        tdiff_vmax = max(450.0, float(np.nanpercentile(tdiff, 99)))
     panels = [
         (axes[0, 0], d["ec_lat"].values,        "viridis", -60, 60,
          "latitude [deg]",          "(a) latitude"),
         (axes[0, 1], d["distance_km"].values,    "plasma",   0,  6,
          "match distance [km]",     "(b) match distance"),
-        (axes[1, 0], d["time_diff_s"].values,    "cividis",  0, 450,
+        (axes[1, 0], d["time_diff_s"].values,    "cividis",  0, tdiff_vmax,
          r"$|\Delta t|$ [s]",       "(c) time offset"),
     ]
     for ax, c, cmap, vmin, vmax, cb_label, title in panels:

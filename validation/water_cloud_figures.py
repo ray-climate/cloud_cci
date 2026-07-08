@@ -57,7 +57,7 @@ def _setup_cot_axes(ax, scale: str = "log") -> None:
     ax.set_aspect("equal", adjustable="box")
     ax.tick_params(direction="in", top=True, right=True, length=4)
     ax.set_xlabel(r"ACM-CAP liquid optical depth $\tau$")
-    ax.set_ylabel(r"ORAC SEVIRI cot")
+    ax.set_ylabel(r"ORAC cot")
     ax.plot(lim, lim, color="0.2", lw=0.9, ls="--", zorder=3)
 
 
@@ -68,7 +68,7 @@ def _setup_cer_axes(ax) -> None:
     ax.set_aspect("equal", adjustable="box")
     ax.tick_params(direction="in", top=True, right=True, length=4)
     ax.set_xlabel(r"ACM-CAP liquid effective radius [$\mu$m]")
-    ax.set_ylabel(r"ORAC SEVIRI cer [$\mu$m]")
+    ax.set_ylabel(r"ORAC cer [$\mu$m]")
     ax.plot(CER_LIM, CER_LIM, color="0.2", lw=0.9, ls="--", zorder=3)
 
 

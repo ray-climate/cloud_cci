@@ -129,6 +129,7 @@ def cot_strata(
         "lat_tropics": lambda d: np.abs(d[lat_col]) < 30,
         "lat_midlat":  lambda d: (np.abs(d[lat_col]) >= 30) & (np.abs(d[lat_col]) < 60),
         "lat_polar":   lambda d: np.abs(d[lat_col]) >= 60,
+        **_polar_strata(lat_col),
         # Surface type: ORAC `lsflag` (0 = ocean, 1 = land). Pixel-aggregate
         # rows take the modal value via mean>0.5 (one row per pixel; equivalent).
         "ocean": lambda d: (d[lsflag_col] < 0.5) if lsflag_col in d.columns else pd.Series(False, index=d.index),
@@ -246,6 +247,20 @@ def cot_report(
 # CTH report
 # ---------------------------------------------------------------------------
 
+def _polar_strata(lat_col: str) -> dict[str, StratumFn]:
+    """Polar sub-bands and hemisphere splits. All empty away from the poles, so
+    they only populate for the SLSTR × EarthCARE (crossing-limited) collocation,
+    where the whole sample lives in |lat| 70–83°. Additive: they add rows to the
+    stats table and are ignored (N=0) for the geostationary SEVIRI collocation."""
+    return {
+        "lat_70_75": lambda d: (np.abs(d[lat_col]) >= 70) & (np.abs(d[lat_col]) < 75),
+        "lat_75_80": lambda d: (np.abs(d[lat_col]) >= 75) & (np.abs(d[lat_col]) < 80),
+        "lat_80_85": lambda d: (np.abs(d[lat_col]) >= 80) & (np.abs(d[lat_col]) < 85),
+        "nh": lambda d: d[lat_col] > 0,
+        "sh": lambda d: d[lat_col] < 0,
+    }
+
+
 def _surface_strata(lsflag_col: str, lat_col: str, dist_col: str,
                     tdiff_col: str) -> dict[str, StratumFn | None]:
     return {
@@ -255,6 +270,7 @@ def _surface_strata(lsflag_col: str, lat_col: str, dist_col: str,
         "lat_tropics": lambda d: np.abs(d[lat_col]) < 30,
         "lat_midlat":  lambda d: (np.abs(d[lat_col]) >= 30) & (np.abs(d[lat_col]) < 60),
         "lat_polar":   lambda d: np.abs(d[lat_col]) >= 60,
+        **_polar_strata(lat_col),
         "dist_lt2km":   lambda d: d[dist_col] < 2,
         "dist_2_5km":   lambda d: (d[dist_col] >= 2) & (d[dist_col] < 5),
         "dist_ge5km":   lambda d: d[dist_col] >= 5,
@@ -590,6 +606,7 @@ def cth_strata(
         "lat_tropics": lambda d: np.abs(d[lat_col]) < 30,
         "lat_midlat":  lambda d: (np.abs(d[lat_col]) >= 30) & (np.abs(d[lat_col]) < 60),
         "lat_polar":   lambda d: np.abs(d[lat_col]) >= 60,
+        **_polar_strata(lat_col),
         "cth_low":  lambda d: d[cth_atlid_col] < 3,
         "cth_mid":  lambda d: (d[cth_atlid_col] >= 3) & (d[cth_atlid_col] < 7),
         "cth_high": lambda d: d[cth_atlid_col] >= 7,

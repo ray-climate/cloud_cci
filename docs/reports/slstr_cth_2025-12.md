@@ -99,6 +99,39 @@ Notable structure:
 - **Geometry is not a driver**: every match is < 2 km and the bias is flat in the
   Δt < 3 min subset, confirming the crossing collocation is tight.
 
+## 3b. Polar sub-bands, hemisphere, and threshold sensitivity
+
+Because the whole sample is polar, the single `lat_polar` bin is coarse. Splitting
+it (qc_strict, pixel) exposes structure:
+
+| stratum      |   N    | bias (km) | RMSE (km) |  R   |
+| ------------ | ------ | --------- | --------- | ---- |
+| lat 70–75°   | 20 975 | −0.34     | 1.75      | 0.65 |
+| lat 75–80°   | 50 079 | −0.52     | 1.99      | 0.61 |
+| lat 80–85°   | 91 202 | −0.65     | 2.19      | 0.55 |
+| **NH (Arctic)**  | 75 443 | **−0.90** | 2.41  | 0.58 |
+| **SH (Antarctic)** | 86 813 | **−0.28** | 1.74 | 0.59 |
+
+Two findings the aggregate hid:
+
+1. **Underestimation grows poleward** — −0.34 km at 70–75° to −0.65 km at 80–85°.
+2. **Hemispheric asymmetry**: the **Arctic CTH is ~3× more underestimated than the
+   Antarctic** (−0.90 vs −0.28 km). December is Arctic polar night / Antarctic
+   polar day, so this is a night-vs-day and surface (winter sea-ice vs summer
+   ice-sheet/ocean) contrast worth following up — a candidate `v5.1_new_snowice`
+   signal.
+
+**Threshold sensitivity.** The headline is insensitive to the collocation
+thresholds. Sweeping Δt ∈ {15, 30, 45, 60} min × distance cap ∈ {1, 2, 3} km
+(`figures/slstr_sensitivity/slstr_cth_sensitivity.png`, `qc_strict`):
+
+- **bias −0.55 … −0.57 km**, **RMSE 2.08 … 2.11 km**, **R 0.58 … 0.60** across the
+  entire grid.
+- The distance cap barely changes N (matches are almost all < 1 km), and Δt
+  15→60 min moves bias by < 0.03 km. The 60-min / nearest-pixel choices do not
+  drive the result. (The Δt sweep to 120 min, `figures/slstr_dt_sweep/`, extends
+  this — agreement is flat there too.)
+
 ## 4. Figures
 
 All under `figures/slstr_cth_2025-12/` (full month) and

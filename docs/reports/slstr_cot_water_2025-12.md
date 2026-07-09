@@ -63,6 +63,23 @@ Key reads:
   ambiguity, high SZA, partial cloud), consistent with the SEVIRI water-COT
   experience that COT validates far more loosely than CTH.
 
+## 3b. Polar sub-band gradient
+
+Splitting the polar band (qc_strict, pixel) shows the +3 all-stratum bias is not
+uniform — it is concentrated at the **lower** polar latitudes:
+
+| stratum    |   N    | bias (τ) | RMSE (τ) | r_log |
+| ---------- | ------ | -------- | -------- | ----- |
+| lat 70–75° | 10 735 | **+29.2**| 69.6     | 0.16  |
+| lat 75–80° | 79 726 | +5.36    | 40.6     | 0.09  |
+| lat 80–85° | 82 554 | **−2.44**| 21.6     | 0.15  |
+
+At 80–85° the water-COT bias is actually near zero / slightly negative with RMSE
+halved; the large positive bias lives at 70–75° (the sea-ice edge / more broken,
+optically thicker cloud with the brightest partial-cloud contrast). The ice-COT
+report shows the same monotonic improvement poleward (+13 → +5.8). This localises
+the bright-surface / partial-cloud inflation to the marginal-ice-zone latitudes.
+
 ## 4. Figures
 
 `figures/slstr_cot_water_2025-12/`:

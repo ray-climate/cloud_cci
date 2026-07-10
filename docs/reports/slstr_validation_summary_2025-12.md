@@ -47,10 +47,12 @@ Result: of **1.71 M matches, every one is at |lat| 70.6–83.0°**; the tropical
 mid-latitude bands come back **N = 0**. This is the standard "simultaneous nadir
 overpass" geometry, not a processing decision.
 
-![Where the collocations occur](../../figures/slstr_collocation/collocation_map_polar.png)
+![Collocation density](../../figures/slstr_collocation/collocation_map_polar.png)
 
-*All matched ATLID profiles ring 70–82° in both hemispheres (853 k N, 860 k S).
-The pole itself is empty — EarthCARE's orbit inclination does not overfly it.*
+*Collocation density (matched profiles per 1000 km², area-normalised) rings
+70–82° in both hemispheres (853 k N, 860 k S). Density peaks in a band around
+75–80° and falls to zero at the pole itself — EarthCARE's orbit inclination does
+not overfly it.*
 
 **Complementarity:** the geostationary **SEVIRI** validation covers ±60°; SLSTR
 covers the poles. Together they span pole-to-tropics against the same ATLID truth.
@@ -63,27 +65,57 @@ covers the poles. Together they span pole-to-tropics against the same ATLID trut
 the 1-D ATLID nadir track threading across it. Each match pairs one lidar profile
 with the SLSTR pixel it falls in — here at 0.37 km median separation.*
 
-### 2.3 Thresholds and their justification
+### 2.3 The two thresholds
 
-- **Temporal ±60 min**, **spatial nearest-pixel (3 km on-swath gate)**. Real
-  matches: **median 0.43 km**, and the time offset fills the 60-min window.
+Each matched pair must satisfy a **temporal** and a **spatial** condition:
 
-![Match quality](../../figures/slstr_collocation/match_quality.png)
+| Threshold | Value | What the matches actually are |
+| --------- | ----- | ----------------------------- |
+| **Temporal** | \|Δt\| ≤ **60 min** | median offset **26 min**; offsets fill the window |
+| **Spatial** | nearest pixel, **≤ 3 km** on-swath gate | median **0.43 km**, max ~1.1 km — sub-pixel |
 
-- **Why 60 min:** agreement is flat with Δt. The crossing-geometry sweep shows
-  matches stay polar and the CTH statistics do not degrade from 5 to 120 min —
-  the tight ~0.4 km spatial match dominates.
+![Collocation thresholds & match quality](../../figures/slstr_collocation/match_quality.png)
+
+#### Spatial threshold vs the instrument footprints
+
+The 3 km gate is not an averaging radius — it is a swath-membership test. Its
+value is best read against the horizontal resolution of the two datasets, which
+we **measured from the data** (adjacent-pixel / adjacent-profile spacing):
+
+| Dataset | Nominal instrument footprint | Measured L2 horizontal grid |
+| ------- | ---------------------------- | --------------------------- |
+| **SLSTR** (nadir, ORAC cloud) | 1 km TIR / 0.5 km solar | **1.1 × 0.9 km** |
+| **ATLID** (A-CTH, A-EBD)      | ~30 m spot, ~285 m sampling | **0.99 km** along-track |
+| **ACM-CAP** (ATLID+CPR+MSI synergy) | CPR ~750 m, MSI 500 m | **0.99 km** along-track |
+
+The two datasets are matched at **~1 km each**, so the ~0.43 km median separation
+is **sub-pixel for both** — there is essentially no footprint-scale mismatch. This
+is a marked contrast with the SEVIRI validation, where 3–7 km geostationary pixels
+had to be matched to the ~1 km ATLID track. The 3 km gate simply excludes profiles
+that fall *outside* a swath (nearest pixel then jumps to tens of km); it is ~3×
+the pixel and, being far above the 0.43 km match median, is not a tuning knob —
+loosening or tightening it 2–3× changes nothing (§2.4).
+
+#### Temporal threshold — why 60 min
+
+Agreement is flat with Δt: the crossing-geometry sweep shows the matches stay
+polar and the CTH statistics do not degrade from 5 to 120 min — the tight ~1 km
+spatial match dominates, and polar clouds evolve slowly.
 
 ![Δt sweep](../../figures/slstr_dt_sweep/slstr_dt_sweep.png)
 
-- **Insensitive to both thresholds:** across Δt ∈ {15,30,45,60} min × distance
-  cap ∈ {1,2,3} km, CTH bias stays −0.55…−0.57 km, RMSE 2.08…2.11, R 0.58…0.60.
+### 2.4 Both thresholds are non-binding — sensitivity
+
+Across Δt ∈ {15, 30, 45, 60} min × distance cap ∈ {1, 2, 3} km, the CTH statistics
+barely move: **bias −0.55…−0.57 km, RMSE 2.08…2.11 km, R 0.58…0.60**. The distance
+cap hardly changes N (matches are almost all < 1 km already).
 
 ![Threshold sensitivity](../../figures/slstr_sensitivity/slstr_cth_sensitivity.png)
 
-*Neither loosening time nor distance helps reach lower latitudes: to match a
-mid-latitude point you would need Δt of hours (clouds change) or distance of
-hundreds of km (different clouds) — either way it stops being a valid match.*
+*And neither threshold can be relaxed to reach lower latitudes without breaking
+the comparison: a mid-latitude match would require Δt of hours (clouds change) or
+a distance of hundreds of km (different clouds). The poles are the only place both
+can be small at once.*
 
 ---
 

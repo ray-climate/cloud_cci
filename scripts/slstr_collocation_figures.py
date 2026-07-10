@@ -24,6 +24,9 @@ import cartopy.feature as cfeature
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.colors import LogNorm
+
+_R_KM = 6371.0
 
 MATCH_GLOB = "validation_data/slstr_cth_2025-12/matches_cth_*.csv"
 OUT = Path("figures/slstr_collocation")
@@ -44,43 +47,54 @@ def _load_all_matches(cols):
 
 
 # ---------------------------------------------------------------------------
-# 1. Polar collocation map
+# 1. Polar collocation density map
 # ---------------------------------------------------------------------------
 def collocation_map():
     df, nfr = _load_all_matches(["valid_match", "ec_lat", "ec_lon"])
     v = df[df["valid_match"] == True]
     lat, lon = v["ec_lat"].values, v["ec_lon"].values
-    # subsample for plotting
-    rng = np.random.RandomState(0)
-    if lat.size > 120_000:
-        sel = rng.choice(lat.size, 120_000, replace=False)
-        lat_s, lon_s = lat[sel], lon[sel]
-    else:
-        lat_s, lon_s = lat, lon
 
-    fig = plt.figure(figsize=(13, 6.6))
-    for i, (proj, extent, name, mask) in enumerate([
-        (ccrs.NorthPolarStereo(), [-180, 180, 60, 90], "Northern hemisphere", lat_s > 0),
-        (ccrs.SouthPolarStereo(), [-180, 180, -90, -60], "Southern hemisphere", lat_s < 0),
+    # Bin into a lon x lat grid and normalise by cell area -> collocation density
+    # (matched profiles per 1000 km2), so the polar area distortion is removed.
+    lon_edges = np.arange(-180, 181, 3.0)
+    fig = plt.figure(figsize=(13.2, 6.8))
+    ims = []
+    for i, (proj, extent, name, lat_edges, hemi) in enumerate([
+        (ccrs.NorthPolarStereo(), [-180, 180, 63, 90], "Northern hemisphere",
+         np.arange(65, 85.1, 0.5), lat > 0),
+        (ccrs.SouthPolarStereo(), [-180, 180, -90, -63], "Southern hemisphere",
+         np.arange(-85, -64.9, 0.5), lat < 0),
     ]):
         ax = fig.add_subplot(1, 2, i + 1, projection=proj)
         ax.set_extent(extent, ccrs.PlateCarree())
-        ax.add_feature(cfeature.LAND, facecolor="#e8e4dc", zorder=0)
-        ax.add_feature(cfeature.OCEAN, facecolor="#d7e7f2", zorder=0)
+        ax.add_feature(cfeature.LAND, facecolor="#efece6", zorder=0)
+        ax.add_feature(cfeature.OCEAN, facecolor="#dbe9f4", zorder=0)
         ax.coastlines(resolution="110m", linewidth=0.5, color="#555")
-        gl = ax.gridlines(draw_labels=False, linewidth=0.4, color="grey", alpha=0.5)
-        ax.scatter(lon_s[mask], lat_s[mask], s=1.5, c="#c0392b", alpha=0.25,
-                   transform=ccrs.PlateCarree(), zorder=3, edgecolors="none")
-        nn = int((lat > 0).sum()) if i == 0 else int((lat < 0).sum())
-        ax.set_title(f"{name}\nN = {nn:,} matched ATLID profiles", fontsize=11)
+        ax.gridlines(draw_labels=False, linewidth=0.4, color="grey", alpha=0.5)
+
+        H, _, _ = np.histogram2d(lon[hemi], lat[hemi], bins=[lon_edges, lat_edges])
+        # cell area (km^2): R^2 * dlon_rad * (sin(lat2)-sin(lat1))
+        dlon = np.deg2rad(np.diff(lon_edges))[:, None]
+        s = np.sin(np.deg2rad(lat_edges))
+        cell_area = (_R_KM ** 2) * dlon * (s[1:] - s[:-1])[None, :]
+        dens = np.where(H > 0, H / (cell_area / 1000.0), np.nan)   # per 1000 km^2
+        im = ax.pcolormesh(lon_edges, lat_edges, dens.T,
+                           transform=ccrs.PlateCarree(), cmap="inferno",
+                           norm=LogNorm(vmin=np.nanmin(dens[dens > 0]),
+                                        vmax=np.nanmax(dens)), zorder=2)
+        ims.append(im)
+        nn = int(hemi.sum())
+        ax.set_title(f"{name}\nN = {nn:,} matched profiles", fontsize=11)
+    cb = fig.colorbar(ims[-1], ax=fig.axes, shrink=0.65, pad=0.02)
+    cb.set_label("collocation density  [matched profiles per 1000 km$^2$]")
 
     med = float(np.median(np.abs(lat)))
     fig.suptitle(
-        "Where ORAC-SLSTR x EarthCARE-ATLID collocations occur (December 2025)\n"
-        f"{len(v):,} matched profiles from {nfr} A-CTH frames  |  "
-        f"median |latitude| = {med:.1f} deg  |  100% poleward of 60 deg",
+        "Collocation density: ORAC-SLSTR x EarthCARE-ATLID (December 2025)\n"
+        f"{len(v):,} matched profiles, {nfr} A-CTH frames  |  "
+        f"median |lat| = {med:.1f}°  |  range 70.6–83.0°, 100% poleward of 60°",
         fontsize=12.5)
-    fig.tight_layout(rect=[0, 0, 1, 0.93])
+    fig.tight_layout(rect=[0, 0, 0.92, 0.92])
     p = OUT / "collocation_map_polar.png"
     fig.savefig(p, dpi=140); plt.close(fig)
     print("wrote", p)
@@ -95,25 +109,42 @@ def match_quality():
     dist = v["distance_km"].values
     dt = v["time_diff_s"].values / 60.0
 
-    fig, ax = plt.subplots(1, 2, figsize=(12, 4.4))
-    ax[0].hist(dist, bins=np.arange(0, 3.05, 0.1), color="#1565c0", edgecolor="white")
-    ax[0].axvline(np.median(dist), color="#c0392b", lw=1.5, ls="--",
-                  label=f"median = {np.median(dist):.2f} km")
-    ax[0].set_xlabel("ATLID -> nearest SLSTR pixel distance [km]")
-    ax[0].set_ylabel("matched profiles")
-    ax[0].set_title("Spatial match is tight (SLSTR ~1 km nadir pixels)")
-    ax[0].legend(); ax[0].grid(alpha=0.3)
+    fig, ax = plt.subplots(1, 2, figsize=(13, 4.6))
 
-    ax[1].hist(dt, bins=np.arange(0, 61, 3), color="#2e7d32", edgecolor="white")
-    ax[1].axvline(np.median(dt), color="#c0392b", lw=1.5, ls="--",
-                  label=f"median = {np.median(dt):.1f} min")
+    # --- Spatial: distance vs the instrument footprint scales ---
+    ax[0].hist(dist, bins=np.arange(0, 3.05, 0.1), color="#1565c0", edgecolor="white",
+               zorder=2)
+    ax[0].axvline(np.median(dist), color="#c0392b", lw=1.8, ls="--", zorder=4,
+                  label=f"match median = {np.median(dist):.2f} km")
+    # footprint / resolution reference scales (measured, ~1 km each)
+    ax[0].axvspan(0.9, 1.12, color="#7e57c2", alpha=0.18, zorder=1,
+                  label="SLSTR pixel & EarthCARE L2 grid (~1 km)")
+    ax[0].axvline(3.0, color="k", lw=1.5, ls=":", zorder=4,
+                  label="on-swath gate = 3 km")
+    ax[0].set_xlabel("ATLID profile → nearest SLSTR pixel distance [km]")
+    ax[0].set_ylabel("matched profiles")
+    ax[0].set_title("Spatial match vs footprint scale\n"
+                    "(SLSTR ≈ EarthCARE ≈ 1 km; matches are sub-pixel)")
+    ax[0].set_xlim(0, 3.1)
+    ax[0].legend(fontsize=8); ax[0].grid(alpha=0.3)
+
+    # --- Temporal ---
+    ax[1].hist(dt, bins=np.arange(0, 61, 3), color="#2e7d32", edgecolor="white",
+               zorder=2)
+    ax[1].axvline(np.median(dt), color="#c0392b", lw=1.8, ls="--", zorder=4,
+                  label=f"match median = {np.median(dt):.1f} min")
+    ax[1].axvline(60, color="k", lw=1.5, ls=":", zorder=4,
+                  label="temporal window = 60 min")
     ax[1].set_xlabel("|time offset|  ATLID vs SLSTR [min]")
     ax[1].set_ylabel("matched profiles")
-    ax[1].set_title("Temporal offset (60-min window; agreement flat vs Dt)")
-    ax[1].legend(); ax[1].grid(alpha=0.3)
+    ax[1].set_title("Temporal offset within the ±60-min window\n"
+                    "(CTH agreement flat across it — see sensitivity)")
+    ax[1].set_xlim(0, 61)
+    ax[1].legend(fontsize=8); ax[1].grid(alpha=0.3)
 
-    fig.suptitle("Collocation match quality - December 2025 (all matched profiles)", fontsize=12.5)
-    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.suptitle("Collocation thresholds & match quality — December 2025 "
+                 "(all matched profiles)", fontsize=12.5)
+    fig.tight_layout(rect=[0, 0, 1, 0.94])
     p = OUT / "match_quality.png"
     fig.savefig(p, dpi=140); plt.close(fig)
     print("wrote", p)

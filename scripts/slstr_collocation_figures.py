@@ -85,16 +85,18 @@ def collocation_map():
         ims.append(im)
         nn = int(hemi.sum())
         ax.set_title(f"{name}\nN = {nn:,} matched profiles", fontsize=11)
-    cb = fig.colorbar(ims[-1], ax=fig.axes, shrink=0.65, pad=0.02)
-    cb.set_label("collocation density  [matched profiles per 1000 km$^2$]")
 
     med = float(np.median(np.abs(lat)))
     fig.suptitle(
         "Collocation density: ORAC-SLSTR x EarthCARE-ATLID (December 2025)\n"
         f"{len(v):,} matched profiles, {nfr} A-CTH frames  |  "
         f"median |lat| = {med:.1f}°  |  range 70.6–83.0°, 100% poleward of 60°",
-        fontsize=12.5)
-    fig.tight_layout(rect=[0, 0, 0.92, 0.92])
+        fontsize=12.5, y=0.99)
+    # Reserve room on the right and give the colourbar its own axis (no overlap).
+    fig.subplots_adjust(left=0.02, right=0.86, top=0.85, bottom=0.03, wspace=0.05)
+    cax = fig.add_axes([0.885, 0.16, 0.017, 0.6])
+    cb = fig.colorbar(ims[-1], cax=cax)
+    cb.set_label("collocation density  [matched profiles per 1000 km$^2$]")
     p = OUT / "collocation_map_polar.png"
     fig.savefig(p, dpi=140); plt.close(fig)
     print("wrote", p)

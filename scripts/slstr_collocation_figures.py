@@ -57,7 +57,7 @@ def collocation_map():
     # Bin into a lon x lat grid and normalise by cell area -> collocation density
     # (matched profiles per 1000 km2), so the polar area distortion is removed.
     lon_edges = np.arange(-180, 181, 3.0)
-    fig = plt.figure(figsize=(13.2, 6.8))
+    fig = plt.figure(figsize=(15.0, 6.8))
     ims = []
     for i, (proj, extent, name, lat_edges, hemi) in enumerate([
         (ccrs.NorthPolarStereo(), [-180, 180, 63, 90], "Northern hemisphere",
@@ -92,9 +92,10 @@ def collocation_map():
         f"{len(v):,} matched profiles, {nfr} A-CTH frames  |  "
         f"median |lat| = {med:.1f}°  |  range 70.6–83.0°, 100% poleward of 60°",
         fontsize=12.5, y=0.99)
-    # Reserve room on the right and give the colourbar its own axis (no overlap).
-    fig.subplots_adjust(left=0.02, right=0.86, top=0.85, bottom=0.03, wspace=0.05)
-    cax = fig.add_axes([0.885, 0.16, 0.017, 0.6])
+    # Reserve room on the right and give the colourbar its own axis, well clear
+    # of the Southern-hemisphere panel (no overlap).
+    fig.subplots_adjust(left=0.02, right=0.80, top=0.85, bottom=0.03, wspace=0.06)
+    cax = fig.add_axes([0.845, 0.16, 0.015, 0.6])
     cb = fig.colorbar(ims[-1], cax=cax)
     cb.set_label("collocation density  [matched profiles per 1000 km$^2$]")
     p = OUT / "collocation_map_polar.png"

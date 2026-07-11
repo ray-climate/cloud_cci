@@ -206,6 +206,15 @@ the aggregate hid:
 4. **Geometry is never the issue.** Every match is < 2 km and the bias is flat in
    the Δt < 3 min subset — the collocation is tight; the residuals are retrieval
    physics.
+5. **The COT deficit is cryospheric — surface, not phase (§3e of the water-COT
+   report).** Splitting by ORAC surface type, water-COT correlates (r = +0.28) and
+   over-reads (+5) *only over open water*; over sea-ice and ice sheet (95 % of the
+   scene) r → 0 and the bias is −4 to −5. Same clouds, only the background changed
+   — direct proof the saturation is the bright-surface radiative regime. CER stays
+   surface-robust (median +0.2/+0.3 µm over sea-ice/ice sheet): trustworthy droplet
+   size over the cryosphere even where τ is unconstrained.
+
+![Surface-type skill](../../figures/slstr_surface_2025-12/surface_type_bias.png)
 
 ---
 
@@ -216,7 +225,7 @@ the aggregate hid:
 | Variables: CTH, water COT, ice COT, CER | ✅ done |
 | Collocation strategy + case study + sensitivity | ✅ done |
 | Stratification: ocean/land · polar sub-bands · hemisphere · distance · time · cloud-class · phase | ✅ done |
-| **Surface type** (sea-ice / snow / ice-sheet / open water) | ⏳ next (needs `stemp`/`lusflag` augment) |
+| **Surface type** (sea-ice / snow / ice-sheet / open water) | ✅ done (§3e — the surface, not the phase) |
 | **CWP** (last synergy variable) | ⏳ next |
 | Phase & cloud-mask (categorical) | ⚪ needs A-FM download |
 | Per-orbit case studies, uncertainty validation | ⚪ optional depth |

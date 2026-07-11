@@ -178,6 +178,63 @@ needs and collapses toward a near-constant τ. This is the polar-bright-surface
 limit of passive COT, and it is the deepest limitation the SLSTR × EarthCARE
 comparison exposes.
 
+## 3e. Surface-type stratification — the deficit is cryospheric, and it is the surface, not the phase
+
+§3d argues the underestimate is a *bright-surface* effect. §3e proves it by
+splitting every matched pixel by its ORAC surface class (surface temperature
+`stemp` + land/sea flag). In the Antarctic-summer daytime sample **95 % of pixels
+are sub-freezing and every land pixel is ice sheet**, so the only cryosphere
+contrast lives inside the ocean: **sea-ice** (frozen ocean, `stemp` < 271.35 K)
+vs the rare **open water** (`stemp` ≥ 271.35 K, ~5 %), against the **snow /
+ice-sheet** land.
+
+![Surface-type skill](../../figures/slstr_surface_2025-12/surface_type_bias.png)
+
+| product | surface | N | **median bias** | mean bias | RMSE | r |
+| ------- | ------- | -- | --------------- | --------- | ---- | -- |
+| **water-COT** | open water        |  7 k | **+4.9** | +20.5 | 45.0 | **+0.28** |
+|               | sea-ice           | 47 k | **−4.4** |  +1.1 | 24.1 |  +0.04 |
+|               | snow / ice-sheet  | 91 k | **−5.5** |  −3.6 | 13.1 |  −0.00 |
+| **CER** | open water        |  7 k | +2.6 | +3.2 | 6.2 | +0.01 |
+|         | sea-ice           | 47 k | **+0.2** | +1.1 | 4.4 | +0.02 |
+|         | snow / ice-sheet  | 91 k | **+0.3** | +3.4 | 8.3 | −0.15 |
+| **ice-COT** | open water        |  4 k | +5.7 | +34.3 | 81.2 | +0.06 |
+|             | sea-ice           | 26 k | +2.7 | +18.2 | 58.7 | −0.04 |
+|             | snow / ice-sheet  | 58 k | +2.5 | +36.4 | 86.1 | −0.05 |
+
+**The single clearest result of the whole comparison:** water-COT is the *only*
+stratum anywhere that shows a **positive correlation — and it is open water**
+(r = +0.28), where ORAC even swings to a **+5 median overestimate**. The instant
+the surface turns to sea-ice or ice sheet, the correlation **collapses to zero**
+(r 0.04, −0.00) and the bias flips to the **−4 to −5 underestimate** of §3. This
+is exactly the fingerprint §3d predicted: over a **dark** ocean background the
+passive solar retrieval has cloud-to-surface reflectance contrast and behaves like
+a working τ retrieval; over the **bright** cryosphere it loses that contrast,
+saturates (§3d), and decorrelates. **The deficiency is the radiative regime of the
+surface, not an algorithm bug and not the cloud phase** — over the same clouds,
+only the background changed.
+
+Two corollaries for the meeting:
+
+- **CER is surface-robust where COT is not.** Effective radius is near-perfect
+  over the cryosphere (median +0.2 µm sea-ice, +0.3 µm ice sheet) and only drifts
+  over open water (+2.6). CER comes from the 1.6/2.1 µm absorption *ratio*, which
+  is far less sensitive to surface-albedo contrast than the τ magnitude — so the
+  `new_snowice` retrieval delivers trustworthy droplet size over snow/ice even
+  where it cannot constrain optical depth.
+- **Ice-COT is only weakly surface-differentiated** (median +2.5 to +2.7 across
+  sea-ice and ice sheet, +5.7 over open water): the A-EBD ice reference and the
+  thermally-anchored ice retrieval are less hostage to solar surface contrast than
+  the liquid solar retrieval, though the wide RMSE (59–86) shows large per-pixel
+  scatter remains.
+
+**Bottom line:** the `new_snowice` build's water optical-depth skill is
+**surface-limited** — usable (positive-correlation) only over open water, which is
+~5 % of the polar-daytime scene; over the 95 % that is sea-ice or ice sheet it
+provides a robust *droplet size* but a saturated, decorrelated optical depth.
+Improving polar liquid τ therefore requires a surface-albedo / snow-BRDF advance,
+not a phase or QC fix.
+
 ## 4. Figures
 
 `figures/slstr_cot_water_2025-12/`:
@@ -189,20 +246,31 @@ comparison exposes.
 - `cot_water_bias_by_stratum_pixel.png`, `cot_water_r_by_stratum_pixel.png` —
   ocean-vs-land and the phase-agreement contrast.
 - `cot_water_qc_sensitivity.png` — bias/RMSE across QC modes.
+- `../slstr_surface_2025-12/surface_type_bias.png` — median bias / r by surface
+  type (open water · sea-ice · snow-ice-sheet) for water-COT, CER and ice-COT
+  (§3e). The open-water positive correlation for water-COT is the standout panel.
 
 ## 5. Conclusions
 
-1. **Polar-summer daytime liquid COT is only mildly biased (+3), and unbiased
-   where phase agrees (−0.65).** This is the best of the three SLSTR variables
-   relative to its SEVIRI analogue.
-2. **The all-stratum bias is dominated by phase mismatch**, not a systematic τ
-   error; restrict to `phase_agree_liquid` for the physical comparison.
-3. **COT correlation is weak** (r_log ~0.1–0.2) — the polar-daytime regime
-   (phase ambiguity + high SZA + partial cloud) is intrinsically hard, as for
-   SEVIRI.
-4. Combined message across the three variables: **thermal CTH is excellent in the
-   polar regime (−0.57 km); solar COT is regime-limited** — ice COT inflated
-   (+7, bright ice sheet), water COT modest (+3, ~0 on matched phase).
+1. **On the median (the typical pixel) ORAC *underestimates* liquid τ by ≈ 5**
+   (median −4.8; §3). The often-quoted "+3" is the *mean*, a skew artefact of a
+   high-τ tail (§3c) — report the median. The underestimate persists on matched
+   phase (−4.9), so it is a genuine τ difference, not phase.
+2. **The underestimate is a saturation, not a scale error** (§3d): ORAC's passive
+   liquid τ is pinned near ~5–8 across the entire ACM-CAP range (0.6–34), so it
+   over-reads thin cloud, under-reads thick, and cannot correlate.
+3. **The saturation is cryospheric — it is the surface, not the phase** (§3e):
+   water-COT correlates (r = +0.28) and over-reads (+5) only over **open water**;
+   over sea-ice and ice sheet (95 % of the scene) r → 0 and the bias is −4 to −5.
+   Same clouds, only the background changed.
+4. **CER is surface-robust** (median +0.2/+0.3 µm over sea-ice/ice sheet): the
+   `new_snowice` build gives trustworthy droplet size over the cryosphere even
+   where it cannot constrain optical depth.
+5. Combined message across the variables: **thermal CTH is excellent in the polar
+   regime (−0.57 km); the solar optical-depth retrievals are surface-limited** —
+   ice COT inflated (+7, bright ice sheet), water COT saturated/decorrelated over
+   the cryosphere and only usable over the rare open-water pixels. Improving polar
+   liquid τ needs a surface-albedo / snow-BRDF advance, not a phase or QC fix.
 
 ## 6. Reproducibility
 

@@ -131,6 +131,43 @@ directly (+7 vs A-EBD) — water and ice COT are two views of one root cause,
 **ORAC's ice-phase optical retrieval running high over polar bright surfaces at
 high sun-zenith**.
 
+## 3d. Root cause of the median underestimate — ORAC passive τ saturates
+
+The median −5 underestimate (§3) is attributed to **ORAC's passive liquid τ having
+almost no dynamic range** over polar bright surfaces at high sun-zenith. Binning
+the phase-agree liquid pixels by ACM-CAP τ:
+
+![Water-COT saturation](../../figures/slstr_cot_water_2025-12/cot_water_saturation.png)
+
+| ACM-CAP τ (synergy) | ORAC median τ | median bias |
+| ------------------- | ------------- | ----------- |
+| 0.6  | 3.5 | **+2.9** |
+| 6.2  | 5.9 | −0.2 |
+| 12.5 | 7.4 | −5.0 |
+| 16.3 | 8.1 | −8.7 |
+| 33.9 | 7.2 | **−27.9** |
+
+- **ORAC liquid τ is pinned near ~5–8 across the *entire* ACM-CAP range (0.6 to
+  34)** — it cannot tell a τ = 6 cloud from a τ = 34 cloud; both come out ≈ 7.
+- This single fact explains the whole water-COT result:
+  (i) it **over-retrieves thin cloud** (+3 at τ < 3),
+  (ii) it **saturates and under-retrieves thick cloud** (−28 at τ ≈ 34),
+  (iii) the **median is −5** because most polar liquid cloud sits in the τ 7–15
+  band where ORAC caps at ~7, and
+  (iv) the **near-zero correlation** (r_log 0.11, R −0.04) follows directly — a
+  retrieval with no dynamic range cannot correlate with anything.
+- **It is ORAC that saturates, not ACM-CAP that is high**: whether the synergy
+  used CPR changes the bias by only ~1 τ (−5.5 with CPR vs −4.4 without), so the
+  radar is not inflating ACM-CAP; the passive retrieval has genuinely lost
+  sensitivity.
+
+**Physical cause:** over a bright snow/ice surface at high solar zenith the
+cloud-to-surface reflectance contrast is small, so adding optical depth barely
+changes the TOA reflectance — the visible/SWIR retrieval loses the information it
+needs and collapses toward a near-constant τ. This is the polar-bright-surface
+limit of passive COT, and it is the deepest limitation the SLSTR × EarthCARE
+comparison exposes.
+
 ## 4. Figures
 
 `figures/slstr_cot_water_2025-12/`:

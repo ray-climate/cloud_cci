@@ -124,12 +124,22 @@ qc_strict, daytime profiles (N = 185 288):
   bright-surface retrieval-difficulty effect on a genuinely supercooled-liquid
   population.
 
-**Conclusion:** ORAC's **liquid** τ retrieval is accurate here (−0.81); the
-headline +3 is a **phase-classification** limitation, not an optical-depth error.
-This is the same inflated ice-phase retrieval that the ice-COT section measures
-directly (+7 vs A-EBD) — water and ice COT are two views of one root cause,
-**ORAC's ice-phase optical retrieval running high over polar bright surfaces at
-high sun-zenith**.
+**Phase-detection skill.** Treated as a validation target in its own right, ORAC
+correctly identifies **78 %** of ACM-CAP-confirmed liquid clouds as liquid
+(POD_liquid; N = 185 658). This skill **degrades with sun-zenith** (87 % at
+SZA < 65° → 75 % at 70–75°) and is **worse over sea-ice ocean (72 %) than the ice
+sheet (82 %)**. *Caveat:* the synergy matches carry only ACM-CAP's liquid
+classification, so **ice-detection skill cannot be scored here** — a full two-way
+phase validation needs A-TC (ATLID target classification, not yet downloaded) or a
+fuller phase collocation. That is a recommended follow-on.
+
+**Two stacked effects (not one).** Note this section (phase) and §3d (saturation)
+are *different*: even where phase agrees, ORAC's liquid τ still under-reads on the
+median (−4.9) because of the saturation in §3d. So the water-COT picture is:
+(1) ORAC's passive liquid τ **saturates** (median −5, §3d), *and* (2) it
+**misclassifies 22 % of liquid cloud as ice** (this section), which adds a high-τ
+tail that flips the *mean* to +3. The mean's positive sign is the misclassification
+artefact; the median's negative sign is the real, saturation-driven behaviour.
 
 ## 3d. Root cause of the median underestimate — ORAC passive τ saturates
 

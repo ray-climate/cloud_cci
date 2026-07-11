@@ -150,17 +150,21 @@ single-layer −0.15 km, R 0.75); high and multi-layer cloud are underestimated 
 
 ### 3.2 Water-cloud optical thickness
 
-Bias **+3.1** overall — but this is a **phase-misclassification artefact, not a τ
-error**. Splitting the ACM-CAP liquid-only sample by whether ORAC agrees on phase:
-where ORAC correctly calls the cloud **liquid (78 %)** its τ tracks ACM-CAP to
-**−0.81**; the entire +3 is carried by the **22 %** ORAC misclassifies as **ice**
-(a decorrelated ORAC-ice-τ-vs-ACM-CAP-liquid-τ comparison). The misclassification
-is a physically-expected polar failure — it doubles with solar-zenith angle
-(13 %→25 %) and is worst over sea-ice.
+**Median −4.8**, mean +3.1 (skewed). Two stacked effects:
+
+1. **ORAC's passive liquid τ saturates** — pinned at ~7–8 across the whole
+   ACM-CAP range (0.6→34) over bright polar surfaces at high sun-zenith. This
+   drives the median underestimate *and* the near-zero correlation (r_log 0.11):
+   a retrieval with no dynamic range can't correlate. It is ORAC saturating, not
+   the radar-aided reference being high.
+2. **ORAC misclassifies 22 % of liquid cloud as ice** (POD_liquid = 78 %,
+   degrading with SZA and worse over sea-ice), which adds a high-τ tail that flips
+   the *mean* to +3. The mean's positive sign is this misclassification artefact.
 
 ![Water COT phase analysis](../../figures/slstr_cot_water_2025-12/cot_water_phase_analysis.png)
+![Water COT saturation](../../figures/slstr_cot_water_2025-12/cot_water_saturation.png)
 
-This is the *same* inflated ice-phase retrieval that §3.3 measures directly (+7 vs
+The ice-misclassification connects to §3.3: it is the *same* ice-phase retrieval that
 A-EBD): **water and ice COT are two views of one root cause** — ORAC's ice-phase
 optical retrieval runs high over polar bright surfaces at high sun-zenith.
 

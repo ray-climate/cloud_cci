@@ -27,6 +27,10 @@ skew-sensitive diagnostic.
 | ocean          |  70 648 | +0.78           | +6.33              | 17.7      | −0.02  |
 | land           | 102 367 | +1.38           | +9.78              | 21.4      | −0.15  |
 
+*95% CI on the median is tight and excludes zero* (all-stratum
+**+1.06 [+1.03, +1.09] µm**, N = 173 015) — the small median bias is significant;
+the near-zero R is the real story.
+
 The headline:
 
 > **On the median, ORAC SLSTR liquid effective radius is nearly unbiased (+1 µm)

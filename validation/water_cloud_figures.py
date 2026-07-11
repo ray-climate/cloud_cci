@@ -23,7 +23,7 @@ import pandas as pd
 
 from .cth_figures import (
     DENSITY_BINS, DENSITY_CMAP, _attach_colorbar, _density_image,
-    _save, _stat_text, _stats,
+    _save, _stat_text, _stats, median_ci95,
 )
 
 COT_LOG_LIM = (-1.0, 2.0)    # log10 of cot (0.1 .. 100)
@@ -136,6 +136,7 @@ def scatter_panel(
             im = _density_image(ax, xv, yv, lim=_lim_for_mode(mode))
             _attach_colorbar(fig, ax, im, label="count")
         _stat_text(ax, n, bias, rmse, r, median_bias=(float((d2[y] - d2[x]).median()) if n >= 2 else None),
+                   median_ci=(median_ci95(d2[y] - d2[x]) if n >= 2 else None),
                    unit=("" if mode.startswith("cot") else r"$\mu$m"))
         ax.set_title(label, pad=6)
     if suptitle:
@@ -165,6 +166,7 @@ def scatter_compare(
             im = _density_image(ax, xv, yv, lim=_lim_for_mode(mode))
             _attach_colorbar(fig, ax, im, label="count")
         _stat_text(ax, n, bias, rmse, r, median_bias=(float((d2[y] - d2[x]).median()) if n >= 2 else None),
+                   median_ci=(median_ci95(d2[y] - d2[x]) if n >= 2 else None),
                    unit=("" if mode.startswith("cot") else r"$\mu$m"))
         ax.set_title(label, pad=6)
     if suptitle:
@@ -202,6 +204,7 @@ def scatter_compare_by_surface(
                 im = _density_image(ax, xv, yv, lim=_lim_for_mode(mode))
                 _attach_colorbar(fig, ax, im, label="count")
             _stat_text(ax, n, bias, rmse, r, median_bias=(float((d2[y] - d2[x]).median()) if n >= 2 else None),
+                   median_ci=(median_ci95(d2[y] - d2[x]) if n >= 2 else None),
                    unit=("" if mode.startswith("cot") else r"$\mu$m"))
             ax.set_title(f"{r_name} — {s_name}", pad=6)
     if suptitle:

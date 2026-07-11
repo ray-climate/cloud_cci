@@ -56,6 +56,9 @@ a skew-sensitive diagnostic.
 | land (ice-sheet/snow)  | 31 930 | +1.71           | +8.43              | 18.5     | 0.05  |
 | τ passive (τ>0.3)      | 40 731 | +2.00           | +6.19              | 14.8     | 0.23  |
 
+*95% CIs are tight and exclude zero* (all-stratum median **+2.04 [+2.00, +2.09]**,
+N = 52 822) — significant, not noise.
+
 The headline:
 
 > **In Antarctic-summer daytime, ORAC SLSTR overestimates ATLID ice-cloud column

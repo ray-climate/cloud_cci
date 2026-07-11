@@ -97,16 +97,34 @@ def _attach_colorbar(fig, ax, im, label: str = "count"):
     return cb
 
 
+def median_ci95(diff) -> tuple[float, float]:
+    """Distribution-free 95% CI for the median of ``diff`` (order statistics)."""
+    d = np.asarray(diff, dtype=float)
+    d = d[np.isfinite(d)]
+    n = d.size
+    if n < 2:
+        return (np.nan, np.nan)
+    z = 1.959964
+    ds = np.sort(d)
+    lo = int(np.clip(np.floor(n / 2 - z * np.sqrt(n) / 2) - 1, 0, n - 1))
+    hi = int(np.clip(np.ceil(n / 2 + z * np.sqrt(n) / 2) - 1, 0, n - 1))
+    return (float(ds[lo]), float(ds[hi]))
+
+
 def _stat_text(ax, n: int, bias: float, rmse: float, r: float, *,
                unit: str = "km", median_bias: float | None = None,
+               median_ci: tuple[float, float] | None = None,
                loc: tuple[float, float] = (0.04, 0.96)) -> None:
     """Stats annotation in the upper-left of ``ax``. ``unit`` is appended to
     bias/RMSE when truthy; pass ``unit=""`` for dimensionless variables. If
     ``median_bias`` is given (heavy-tailed cot/cer), it is shown as the headline
-    with the mean flagged as skew-sensitive."""
+    with the mean flagged as skew-sensitive; ``median_ci`` adds a 95% interval."""
     suffix = f" {unit}" if unit else ""
     if median_bias is not None:
-        bias_lines = (f"median bias = {median_bias:+.2f}{suffix}\n"
+        ci = ""
+        if median_ci is not None and np.isfinite(median_ci[0]):
+            ci = f" [{median_ci[0]:+.2f}, {median_ci[1]:+.2f}]"
+        bias_lines = (f"median bias = {median_bias:+.2f}{suffix}{ci}\n"
                       f"mean bias = {bias:+.2f}{suffix} (skewed)\n")
     else:
         bias_lines = f"bias = {bias:+.2f}{suffix}\n"

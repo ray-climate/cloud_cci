@@ -31,6 +31,20 @@ DENSITY_BINS = 60
 DENSITY_CMAP = "viridis"
 
 
+def median_ci95(diff) -> tuple[float, float]:
+    """Distribution-free 95% CI for the median of ``diff`` (order statistics)."""
+    d = np.asarray(diff, dtype=float)
+    d = d[np.isfinite(d)]
+    n = d.size
+    if n < 2:
+        return (np.nan, np.nan)
+    z = 1.959964
+    ds = np.sort(d)
+    lo = int(np.clip(np.floor(n / 2 - z * np.sqrt(n) / 2) - 1, 0, n - 1))
+    hi = int(np.clip(np.ceil(n / 2 + z * np.sqrt(n) / 2) - 1, 0, n - 1))
+    return (float(ds[lo]), float(ds[hi]))
+
+
 def _stats(d: pd.DataFrame, x: str, y: str) -> tuple[int, float, float, float, float]:
     """Return ``(n, bias, rmse, r, r_log)``. ``r_log`` is Pearson R on
     ``log10(clip(., COT_FLOOR))`` — the metric the cot literature uses
@@ -108,16 +122,20 @@ def _attach_colorbar(fig, ax, im, label: str = "count"):
 
 def _stat_text(ax, n: int, bias: float, rmse: float, r_log: float, *,
                median_bias: float | None = None,
+               median_ci: tuple[float, float] | None = None,
                loc: tuple[float, float] = (0.04, 0.96)) -> None:
     """Stats annotation in the upper-left of ``ax``.
 
     Reports ``R_log`` rather than raw ``R`` — for cot the log-space
     correlation is the meaningful metric (Karlsson 2013 / PVIR convention).
     For heavy-tailed cot, ``median_bias`` (if given) is the headline and the
-    mean is flagged as skew-sensitive.
+    mean is flagged as skew-sensitive; ``median_ci`` adds a 95% interval.
     """
     if median_bias is not None:
-        bias_lines = (f"median bias = {median_bias:+.2f}\n"
+        ci = ""
+        if median_ci is not None and np.isfinite(median_ci[0]):
+            ci = f" [{median_ci[0]:+.2f}, {median_ci[1]:+.2f}]"
+        bias_lines = (f"median bias = {median_bias:+.2f}{ci}\n"
                       f"mean bias = {bias:+.2f} (skewed)\n")
     else:
         bias_lines = f"bias = {bias:+.2f}\n"
@@ -168,7 +186,8 @@ def scatter_panel(
             im = _density_image(ax, _logclip(d2[x]), _logclip(d2[y]))
             _attach_colorbar(fig, ax, im, label="count")
         _stat_text(ax, n, bias, rmse, r_log,
-                   median_bias=(float((d2[y] - d2[x]).median()) if n >= 2 else None))
+                   median_bias=(float((d2[y] - d2[x]).median()) if n >= 2 else None),
+                   median_ci=(median_ci95(d2[y] - d2[x]) if n >= 2 else None))
         ax.set_title(label, pad=6)
     if suptitle:
         fig.suptitle(suptitle, fontsize=11, y=1.02)

@@ -43,6 +43,11 @@ robust headline; the mean is shown alongside as a skew-sensitive diagnostic.
 | land (ice shelf / coast)   | 102 367 | −5.16           | +1.50              | 34.6     | 0.07  |
 | phase_agree_liquid         | 134 663 | −4.86           | −0.65              | 20.3     | 0.15  |
 
+*95% confidence intervals are tight and exclude zero* (all-stratum median
+**−4.78 [−4.81, −4.75]**, mean +3.12 [+2.95, +3.28], N = 173 015) — the biases
+are statistically significant, not sampling noise. (Median CI is the
+distribution-free order-statistic interval; mean CI is ±1.96 SE.)
+
 The headline:
 
 > **On the median (the typical pixel), ORAC SLSTR *underestimates* ACM-CAP liquid

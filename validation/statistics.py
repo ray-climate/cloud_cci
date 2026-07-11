@@ -83,8 +83,10 @@ def continuous_stats(d: pd.DataFrame, x: str, y: str,
     d = d[[x, y]].dropna()
     n = len(d)
     if n < 2:
-        return dict(n=n, bias=np.nan, median_bias=np.nan, rmse=np.nan, mae=np.nan,
-                    r=np.nan, r_log=np.nan, slope=np.nan, intercept=np.nan)
+        return dict(n=n, bias=np.nan, bias_lo=np.nan, bias_hi=np.nan,
+                    median_bias=np.nan, median_bias_lo=np.nan, median_bias_hi=np.nan,
+                    rmse=np.nan, mae=np.nan, r=np.nan, r_log=np.nan,
+                    slope=np.nan, intercept=np.nan)
     xv = d[x].values
     yv = d[y].values
     diff = yv - xv
@@ -93,6 +95,16 @@ def continuous_stats(d: pd.DataFrame, x: str, y: str,
     # the mean is dominated by a small high-value tail, so it can even flip sign
     # relative to the typical (median) difference.
     median_bias = float(np.median(diff))
+    # 95% confidence intervals (analytical, fast):
+    #  - mean: +/- 1.96 * standard error
+    #  - median: distribution-free order-statistic interval
+    _Z = 1.959964
+    se = float(diff.std(ddof=1) / np.sqrt(n))
+    bias_lo, bias_hi = bias - _Z * se, bias + _Z * se
+    ds = np.sort(diff)
+    lo = int(np.clip(np.floor(n / 2 - _Z * np.sqrt(n) / 2) - 1, 0, n - 1))
+    hi = int(np.clip(np.ceil(n / 2 + _Z * np.sqrt(n) / 2) - 1, 0, n - 1))
+    median_bias_lo, median_bias_hi = float(ds[lo]), float(ds[hi])
     rmse = float(np.sqrt((diff ** 2).mean()))
     mae = float(np.abs(diff).mean())
     if d[x].std() > 0 and d[y].std() > 0:
@@ -104,7 +116,9 @@ def continuous_stats(d: pd.DataFrame, x: str, y: str,
     else:
         r = r_log = np.nan
         slope = intercept = np.nan
-    return dict(n=n, bias=bias, median_bias=median_bias, rmse=rmse, mae=mae,
+    return dict(n=n, bias=bias, bias_lo=bias_lo, bias_hi=bias_hi,
+                median_bias=median_bias, median_bias_lo=median_bias_lo,
+                median_bias_hi=median_bias_hi, rmse=rmse, mae=mae,
                 r=r, r_log=r_log, slope=float(slope), intercept=float(intercept))
 
 

@@ -28,6 +28,11 @@ the mean is shown as a skew-sensitive diagnostic (for water COT the mean even
 | **Ice COT**   | A-EBD column τ  | polar, day (Antarctic) | **median +2.0** (mean +7.2 *skewed*), r_log 0.17 | modest, noisy |
 | **CER**       | ACM-CAP liquid rₑ | polar, day (Antarctic) | **median +1.1 µm** (mean +8.4 *skewed*), R ≈ **−0.1** | low bias, no skill |
 
+All headline biases are **statistically significant** — the 95% confidence
+intervals are tight (N = 53k–173k) and exclude zero (e.g. water COT median
+−4.78 [−4.81, −4.75]; CER +1.06 [+1.03, +1.09] µm). The limitation is *weak
+correlation*, not sampling noise.
+
 **One-line message:** in the polar regime this sensor pairing can access, the
 **thermal** cloud-top retrieval is nearly unbiased *and correlated* (−0.57 km,
 R 0.58). The **solar** retrievals (COT, CER) have only **small-to-moderate median

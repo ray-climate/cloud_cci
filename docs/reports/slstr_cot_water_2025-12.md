@@ -31,37 +31,40 @@ Coverage: **N = 173 015 SLSTR pixels** (pixel view; sample-level identical to 3 
 
 ## 3. Headline results (qc_strict, pixel, water-pure)
 
-| stratum                    |    N    | bias (τ) | RMSE (τ) | r_log |
-| -------------------------- | ------- | -------- | -------- | ----- |
-| **all (= S-polar)**        | 173 015 | **+3.12**| 35.8     | 0.11  |
-| ocean (sea-ice / S. Ocean) |  70 648 | +5.46    | 37.4     | 0.17  |
-| land (ice shelf / coast)   | 102 367 | +1.50    | 34.6     | 0.07  |
-| **phase_agree_liquid**     | 134 663 | **−0.65**| **20.3** | 0.15  |
-| tdiff < 3 min              |   9 368 | +2.21    | 35.5     | 0.20  |
+**Report the median bias, not the mean.** COT is heavy-tailed (log-distributed
+over three decades); the mean in linear τ is dominated by a small high-τ tail and
+here it even **flips sign** relative to the typical pixel. The median is the
+robust headline; the mean is shown alongside as a skew-sensitive diagnostic.
+
+| stratum                    |    N    | **median bias** | mean bias (skewed) | RMSE (τ) | r_log |
+| -------------------------- | ------- | --------------- | ------------------ | -------- | ----- |
+| **all (= S-polar)**        | 173 015 | **−4.78**       | +3.12              | 35.8     | 0.11  |
+| ocean (sea-ice / S. Ocean) |  70 648 | −4.22           | +5.46              | 37.4     | 0.17  |
+| land (ice shelf / coast)   | 102 367 | −5.16           | +1.50              | 34.6     | 0.07  |
+| phase_agree_liquid         | 134 663 | −4.86           | −0.65              | 20.3     | 0.15  |
 
 The headline:
 
-> **In Antarctic-summer daytime, ORAC SLSTR overestimates ACM-CAP liquid τ by only
-> ≈ +3 overall — and by essentially zero (−0.65, RMSE 20) once both instruments
-> agree the column is liquid (`phase_agree_liquid`). Correlation is weak
-> (r_log ≈ 0.11–0.15), the expected noise of polar-daytime COT.**
+> **On the median (the typical pixel), ORAC SLSTR *underestimates* ACM-CAP liquid
+> τ by ≈ 5 (median bias −4.8; ORAC median τ 6.9 vs ACM-CAP 12.1) throughout the
+> polar-daytime sample.** The frequently-quoted "+3 mean bias" is a **skew
+> artefact** — a minority of very-high-τ pixels drags the linear mean positive,
+> even reversing its sign. Correlation is weak (r_log ≈ 0.11), the expected noise
+> of polar-daytime COT.
 
-Key reads:
+Two distinct effects, which the mean conflates and the median/§3c separate:
 
-- **`phase_agree_liquid` is the trustworthy comparison** and it is nearly
-  unbiased (−0.65) with RMSE roughly half the all-stratum value. The +3.1
-  all-stratum bias is therefore largely a **phase-mismatch artefact** — pixels
-  where ORAC retrieves ice/mixed while ACM-CAP reports liquid (and vice versa)
-  contribute τ that is not a like-for-like comparison.
-- **Better than both the SEVIRI polar water-COT (+18)** and the SLSTR ice COT
-  (+7). Two plausible contributors: SLSTR's ~1 km nadir footprint suffers less
-  sub-pixel partial-cloud inflation than SEVIRI's 3–7 km pixels, and the liquid
-  scenes here are lower/optically simpler than the ice regime.
-- **Ocean bias (+5.5) > land (+1.5)** — the reverse of the ice-COT case;
-  low-sun sea-ice / Southern-Ocean liquid is where the residual overestimate sits.
-- **Low r_log** (0.11–0.20) — polar-daytime COT is intrinsically noisy (phase
-  ambiguity, high SZA, partial cloud), consistent with the SEVIRI water-COT
-  experience that COT validates far more loosely than CTH.
+1. **A typical underestimate (median −5).** ORAC's passive liquid τ sits below the
+   ACM-CAP synergy τ for the bulk of pixels — visible as the density ridge
+   *below* the 1:1 line in the scatter. This holds even in `phase_agree_liquid`
+   (median −4.9), so it is a genuine liquid-τ difference, not a phase effect.
+2. **A high-τ tail that inflates the mean**, concentrated in the pixels ORAC
+   misclassifies as ice (§3c). This is what turns a −5 median into a +3 mean, and
+   it is worst at the lower polar latitudes (70–75°: median +1 but mean +29).
+
+> **Net:** ORAC liquid τ typically runs a few τ *low* against the synergy
+> reference; the "+3 overestimate" seen in the mean is not representative and is
+> driven by a skewed tail plus phase misclassification.
 
 ## 3b. Polar sub-band gradient
 

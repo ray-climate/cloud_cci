@@ -107,15 +107,23 @@ def _attach_colorbar(fig, ax, im, label: str = "count"):
 
 
 def _stat_text(ax, n: int, bias: float, rmse: float, r_log: float, *,
+               median_bias: float | None = None,
                loc: tuple[float, float] = (0.04, 0.96)) -> None:
     """Stats annotation in the upper-left of ``ax``.
 
     Reports ``R_log`` rather than raw ``R`` — for cot the log-space
     correlation is the meaningful metric (Karlsson 2013 / PVIR convention).
+    For heavy-tailed cot, ``median_bias`` (if given) is the headline and the
+    mean is flagged as skew-sensitive.
     """
+    if median_bias is not None:
+        bias_lines = (f"median bias = {median_bias:+.2f}\n"
+                      f"mean bias = {bias:+.2f} (skewed)\n")
+    else:
+        bias_lines = f"bias = {bias:+.2f}\n"
     txt = (
         f"$N$ = {n:,}\n"
-        f"bias = {bias:+.2f}\n"
+        f"{bias_lines}"
         f"RMSE = {rmse:.2f}\n"
         f"$R_{{\\mathrm{{log}}}}$ = {r_log:.2f}"
     )
@@ -159,7 +167,8 @@ def scatter_panel(
         if n >= 2:
             im = _density_image(ax, _logclip(d2[x]), _logclip(d2[y]))
             _attach_colorbar(fig, ax, im, label="count")
-        _stat_text(ax, n, bias, rmse, r_log)
+        _stat_text(ax, n, bias, rmse, r_log,
+                   median_bias=(float((d2[y] - d2[x]).median()) if n >= 2 else None))
         ax.set_title(label, pad=6)
     if suptitle:
         fig.suptitle(suptitle, fontsize=11, y=1.02)

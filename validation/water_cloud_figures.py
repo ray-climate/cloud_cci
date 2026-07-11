@@ -135,7 +135,8 @@ def scatter_panel(
             xv, yv = _xy_for_mode(d2, x, y, mode)
             im = _density_image(ax, xv, yv, lim=_lim_for_mode(mode))
             _attach_colorbar(fig, ax, im, label="count")
-        _stat_text(ax, n, bias, rmse, r, unit=("" if mode.startswith("cot") else r"$\mu$m"))
+        _stat_text(ax, n, bias, rmse, r, median_bias=(float((d2[y] - d2[x]).median()) if n >= 2 else None),
+                   unit=("" if mode.startswith("cot") else r"$\mu$m"))
         ax.set_title(label, pad=6)
     if suptitle:
         fig.suptitle(suptitle, fontsize=11, y=1.02)
@@ -163,7 +164,8 @@ def scatter_compare(
             xv, yv = _xy_for_mode(d2, x, y, mode)
             im = _density_image(ax, xv, yv, lim=_lim_for_mode(mode))
             _attach_colorbar(fig, ax, im, label="count")
-        _stat_text(ax, n, bias, rmse, r, unit=("" if mode.startswith("cot") else r"$\mu$m"))
+        _stat_text(ax, n, bias, rmse, r, median_bias=(float((d2[y] - d2[x]).median()) if n >= 2 else None),
+                   unit=("" if mode.startswith("cot") else r"$\mu$m"))
         ax.set_title(label, pad=6)
     if suptitle:
         fig.suptitle(suptitle, fontsize=11, y=1.02)
@@ -199,7 +201,8 @@ def scatter_compare_by_surface(
                 xv, yv = _xy_for_mode(d2, x, y, mode)
                 im = _density_image(ax, xv, yv, lim=_lim_for_mode(mode))
                 _attach_colorbar(fig, ax, im, label="count")
-            _stat_text(ax, n, bias, rmse, r, unit=("" if mode.startswith("cot") else r"$\mu$m"))
+            _stat_text(ax, n, bias, rmse, r, median_bias=(float((d2[y] - d2[x]).median()) if n >= 2 else None),
+                   unit=("" if mode.startswith("cot") else r"$\mu$m"))
             ax.set_title(f"{r_name} — {s_name}", pad=6)
     if suptitle:
         fig.suptitle(suptitle, fontsize=11, y=1.0)

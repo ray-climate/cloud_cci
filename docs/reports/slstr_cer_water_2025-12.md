@@ -18,20 +18,23 @@ collocation.
 
 ## 2. Headline results (qc_strict, pixel)
 
-| stratum        |    N    | bias (µm) | RMSE (µm) |   R    |
-| -------------- | ------- | --------- | --------- | ------ |
-| **all**        | 173 015 | **+8.37** | 19.9      | −0.11  |
-| ocean          |  70 648 | +6.33     | 17.7      | −0.02  |
-| land           | 102 367 | +9.78     | 21.4      | −0.15  |
-| lat_70–75°     |  10 735 | +9.04     | 19.4      | −0.02  |
-| lat_75–80°     |  79 726 | +8.27     | 19.6      | −0.10  |
-| lat_80–85°     |  82 554 | +8.38     | 20.3      | −0.13  |
+CER is right-skewed, so the **median bias** is the headline and the mean is a
+skew-sensitive diagnostic.
+
+| stratum        |    N    | **median bias** | mean bias (skewed) | RMSE (µm) |   R    |
+| -------------- | ------- | --------------- | ------------------ | --------- | ------ |
+| **all**        | 173 015 | **+1.06 µm**    | +8.37              | 19.9      | −0.11  |
+| ocean          |  70 648 | +0.78           | +6.33              | 17.7      | −0.02  |
+| land           | 102 367 | +1.38           | +9.78              | 21.4      | −0.15  |
 
 The headline:
 
-> **ORAC SLSTR overestimates liquid effective radius by ≈ +8 µm with essentially
-> no skill (R ≈ −0.1) in Antarctic-summer daytime.** The bias is flat across the
-> polar sub-bands and slightly worse over the ice sheet (+9.8) than sea-ice (+6.3).
+> **On the median, ORAC SLSTR liquid effective radius is nearly unbiased (+1 µm)
+> — but has essentially no skill (R ≈ −0.1).** The +8 µm often quoted is a *mean*
+> skewed by a high-radius tail; the typical bias is small. The real problem is not
+> bias but the **absence of correlation**: in Antarctic-summer daytime (bright
+> ice, high SZA) ORAC's SWIR radius retrieval does not track the true particle
+> size, it just scatters around roughly the right central value.
 
 ## 3. Interpretation
 

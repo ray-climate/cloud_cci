@@ -17,18 +17,25 @@ ATLID A-EBD, ATLID+CPR+MSI ACM-CAP) for **December 2025** — the one full month
 this ORAC stream. Reusing the collocation framework proven on SEVIRI, only a new
 SLSTR granule reader and a polar-crossing collocator were added.
 
+COT and CER are heavy-tailed, so the **median bias** is the robust headline and
+the mean is shown as a skew-sensitive diagnostic (for water COT the mean even
+*flips sign* relative to the median).
+
 | Variable | Reference | Regime | Headline (qc_strict, pixel) | Verdict |
 | -------- | --------- | ------ | --------------------------- | ------- |
 | **CTH**       | A-CTH (ATLID)   | polar, day+night | bias **−0.57 km**, RMSE 2.08 km, R **0.58** | **good** |
-| **Water COT** | ACM-CAP liquid τ | polar, day (Antarctic) | bias **+3.1** (−0.65 phase-agreed), r_log 0.11 | modest |
-| **Ice COT**   | A-EBD column τ  | polar, day (Antarctic) | bias **+7.2**, r_log 0.17 | poor |
-| **CER**       | ACM-CAP liquid rₑ | polar, day (Antarctic) | bias **+8 µm**, R ≈ **−0.1** | weakest |
+| **Water COT** | ACM-CAP liquid τ | polar, day (Antarctic) | **median −4.8** (mean +3.1 *skewed*), r_log 0.11 | τ low, noisy |
+| **Ice COT**   | A-EBD column τ  | polar, day (Antarctic) | **median +2.0** (mean +7.2 *skewed*), r_log 0.17 | modest, noisy |
+| **CER**       | ACM-CAP liquid rₑ | polar, day (Antarctic) | **median +1.1 µm** (mean +8.4 *skewed*), R ≈ **−0.1** | low bias, no skill |
 
 **One-line message:** in the polar regime this sensor pairing can access, the
-**thermal** cloud-top retrieval is nearly unbiased, while the **solar** optical
-retrievals (COT, and especially the SWIR-based CER) degrade over bright ice at
-high sun-zenith — a coherent snow/ice-surface signal for the `v5.1_new_snowice`
-build.
+**thermal** cloud-top retrieval is nearly unbiased *and correlated* (−0.57 km,
+R 0.58). The **solar** retrievals (COT, CER) have only **small-to-moderate median
+biases** (liquid τ ≈ −5, ice τ ≈ +2, CER ≈ +1 µm) but **weak correlation** — they
+are **noisy, not grossly biased**. The large positive *mean* biases reported
+elsewhere are **skew artefacts** of the heavy COT tail plus phase misclassification
+(§3.2); the real limitation over polar bright surfaces at high sun-zenith is
+**scatter and phase mis-ID**, not a large systematic τ offset.
 
 ---
 

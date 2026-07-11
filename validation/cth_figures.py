@@ -98,14 +98,21 @@ def _attach_colorbar(fig, ax, im, label: str = "count"):
 
 
 def _stat_text(ax, n: int, bias: float, rmse: float, r: float, *,
-               unit: str = "km",
+               unit: str = "km", median_bias: float | None = None,
                loc: tuple[float, float] = (0.04, 0.96)) -> None:
     """Stats annotation in the upper-left of ``ax``. ``unit`` is appended to
-    bias/RMSE when truthy; pass ``unit=""`` for dimensionless variables."""
+    bias/RMSE when truthy; pass ``unit=""`` for dimensionless variables. If
+    ``median_bias`` is given (heavy-tailed cot/cer), it is shown as the headline
+    with the mean flagged as skew-sensitive."""
     suffix = f" {unit}" if unit else ""
+    if median_bias is not None:
+        bias_lines = (f"median bias = {median_bias:+.2f}{suffix}\n"
+                      f"mean bias = {bias:+.2f}{suffix} (skewed)\n")
+    else:
+        bias_lines = f"bias = {bias:+.2f}{suffix}\n"
     txt = (
         f"$N$ = {n:,}\n"
-        f"bias = {bias:+.2f}{suffix}\n"
+        f"{bias_lines}"
         f"RMSE = {rmse:.2f}{suffix}\n"
         f"$R$ = {r:.2f}"
     )

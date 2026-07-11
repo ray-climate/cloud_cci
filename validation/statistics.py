@@ -83,12 +83,16 @@ def continuous_stats(d: pd.DataFrame, x: str, y: str,
     d = d[[x, y]].dropna()
     n = len(d)
     if n < 2:
-        return dict(n=n, bias=np.nan, rmse=np.nan, mae=np.nan,
+        return dict(n=n, bias=np.nan, median_bias=np.nan, rmse=np.nan, mae=np.nan,
                     r=np.nan, r_log=np.nan, slope=np.nan, intercept=np.nan)
     xv = d[x].values
     yv = d[y].values
     diff = yv - xv
     bias = float(diff.mean())
+    # median bias is the robust headline for heavy-tailed quantities (cot/cer):
+    # the mean is dominated by a small high-value tail, so it can even flip sign
+    # relative to the typical (median) difference.
+    median_bias = float(np.median(diff))
     rmse = float(np.sqrt((diff ** 2).mean()))
     mae = float(np.abs(diff).mean())
     if d[x].std() > 0 and d[y].std() > 0:
@@ -100,8 +104,8 @@ def continuous_stats(d: pd.DataFrame, x: str, y: str,
     else:
         r = r_log = np.nan
         slope = intercept = np.nan
-    return dict(n=n, bias=bias, rmse=rmse, mae=mae, r=r, r_log=r_log,
-                slope=float(slope), intercept=float(intercept))
+    return dict(n=n, bias=bias, median_bias=median_bias, rmse=rmse, mae=mae,
+                r=r, r_log=r_log, slope=float(slope), intercept=float(intercept))
 
 
 # ---------------------------------------------------------------------------

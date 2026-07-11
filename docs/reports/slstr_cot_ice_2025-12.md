@@ -46,23 +46,29 @@ Coverage after day-filter and ice-only: **N = 52 822 SLSTR pixels** (pixel view)
 
 ## 3. Headline results (ice-only, daytime, not-attenuated)
 
-| stratum (pixel view)   |   N    | bias (τ) | RMSE (τ) | r_log |
-| ---------------------- | ------ | -------- | -------- | ----- |
-| **all (= S-polar)**    | 52 822 | **+7.19**| **16.4** | 0.17  |
-| ocean (sea-ice)        | 20 892 | +5.29    | 12.4     | 0.37  |
-| land (ice-sheet/snow)  | 31 930 | +8.43    | 18.5     | 0.05  |
-| tdiff < 3 min          |  3 464 | +6.18    | 14.6     | 0.25  |
-| τ passive (τ>0.3)      | 40 731 | +6.19    | 14.8     | 0.23  |
-| attenuated (diagnostic)| 20 835 | +6.95    | 15.9     | 0.12  |
+COT is heavy-tailed, so the **median bias** is the headline; the mean is shown as
+a skew-sensitive diagnostic.
 
-Bias/RMSE in linear τ; r_log in log10 space.
+| stratum (pixel view)   |   N    | **median bias** | mean bias (skewed) | RMSE (τ) | r_log |
+| ---------------------- | ------ | --------------- | ------------------ | -------- | ----- |
+| **all (= S-polar)**    | 52 822 | **+2.04**       | +7.19              | 16.4     | 0.17  |
+| ocean (sea-ice)        | 20 892 | +2.44           | +5.29              | 12.4     | 0.37  |
+| land (ice-sheet/snow)  | 31 930 | +1.71           | +8.43              | 18.5     | 0.05  |
+| τ passive (τ>0.3)      | 40 731 | +2.00           | +6.19              | 14.8     | 0.23  |
 
 The headline:
 
 > **In Antarctic-summer daytime, ORAC SLSTR overestimates ATLID ice-cloud column
-> optical thickness by ≈ +7 (RMSE ≈ 16), with weak correlation (r_log ≈ 0.17).
-> The overestimate is worse over the bright ice sheet (land +8.4) than over
-> sea-ice (ocean +5.3).**
+> τ by only ≈ +2 on the median** (not the +7 the mean suggests — COT is
+> heavy-tailed and the linear mean is inflated by a small high-τ tail).
+> Correlation is weak (r_log ≈ 0.17): the retrieval is **noisy, not grossly
+> biased**.
+
+Note the **land/ocean contrast is a mean artefact**: the *median* biases over
+sea-ice (+2.4) and the ice sheet (+1.7) are similar — the large land *mean* (+8.4)
+is driven by the high-τ tail, not a systematically thicker retrieval over the ice
+sheet. §4/§5 discussion of "worse over the ice sheet" refers to the (skew-prone)
+mean and should be read with that caveat.
 
 ## 4. Interpretation — why so much worse than SEVIRI ice COT (+1.3)?
 

@@ -101,22 +101,32 @@ def main() -> int:
 
     ax[0].set_yticks(ticks)
     ax[0].set_yticklabels(labels, fontsize=9.5)
-    ax[0].set_ylim(-0.7, max(y) + 0.7)
+    ax[0].set_ylim(-0.7, max(y) + 1.4)
     for a in ax:
         a.grid(axis="x", alpha=0.3, zorder=0)
 
-    # group labels in the far-left margin (clear of the — now short — tick labels)
+    # Group headers: horizontal, placed INSIDE the top-left of the bias panel just
+    # above each group — completely clear of the y-tick labels. A faint divider
+    # separates the two groups in every panel.
     for grp in dict.fromkeys(groups):
         ys = [yy for yy, gg in zip(y, groups) if gg == grp]
-        ax[0].text(-0.30, np.mean(ys), grp, transform=ax[0].get_yaxis_transform(),
-                   rotation=90, va="center", ha="center", fontsize=9.5,
-                   fontweight="bold", color="#444", linespacing=0.9)
+        ax[0].text(0.015, max(ys) + 0.5, grp.replace("\n", " "),
+                   transform=ax[0].get_yaxis_transform(), va="bottom", ha="left",
+                   fontsize=9.5, fontweight="bold", color="#555")
+    # divider between the two groups
+    gap_y = None
+    for i in range(1, len(groups)):
+        if groups[i] != groups[i - 1]:
+            gap_y = (y[i] + y[i - 1]) / 2
+    if gap_y is not None:
+        for a in ax:
+            a.axhline(gap_y, color="0.8", lw=0.8, zorder=0)
 
     fig.suptitle("ORAC SLSTR cloud-top height by cloud type — December 2025 "
                  "(polar, qc_strict, pixel)\n"
                  "single-layer / low cloud is unbiased; multi-layer & high cloud "
                  "are underestimated by ~4 km", fontsize=12)
-    fig.subplots_adjust(left=0.22, right=0.99, top=0.87, bottom=0.11, wspace=0.08)
+    fig.subplots_adjust(left=0.13, right=0.99, top=0.88, bottom=0.11, wspace=0.08)
     OUT.mkdir(parents=True, exist_ok=True)
     p = OUT / "cth_by_cloud_type.png"
     fig.savefig(p, dpi=140); plt.close(fig)

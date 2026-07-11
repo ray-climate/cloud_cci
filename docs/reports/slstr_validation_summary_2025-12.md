@@ -160,16 +160,19 @@ optical retrieval runs high over polar bright surfaces at high sun-zenith.
 
 ### 3.3 Ice-cloud optical thickness
 
-Bias **+7.2** (RMSE 16, r_log 0.17), worse over the ice sheet (+8.4) than sea-ice
-(+5.3). Bright-surface + partial-cloud + high-SZA inflation — the same mechanism
-as the SEVIRI polar water bias, hitting ice COT over Antarctica.
+**Median bias +2.0** (mean +7.2, skewed; RMSE 16, r_log 0.17). The typical ice
+overestimate is modest; the large *mean* — and its apparent land>ocean contrast —
+are high-τ-tail artefacts (median land +1.7 ≈ ocean +2.4). The limitation is
+scatter (weak r_log), not a large systematic offset.
 
 ![Ice COT scatter](../../figures/slstr_cot_ice_2025-12/cot_scatter.png)
 
-### 3.4 Cloud effective radius — the weakest
+### 3.4 Cloud effective radius — nearly unbiased but no skill
 
-Bias **+8 µm** with essentially no skill (**R ≈ −0.1**). ORAC's SWIR radius
-retrieval loses information over bright snow/ice at high sun-zenith.
+**Median bias +1 µm** (mean +8.4, skewed). The typical radius is nearly right; the
+real problem is **no correlation** (R ≈ −0.1) — over bright snow/ice at high
+sun-zenith ORAC's SWIR radius retrieval scatters around the central value rather
+than tracking the true particle size.
 
 ![CER scatter](../../figures/slstr_cer_water_2025-12/cer_water_scatter.png)
 

@@ -21,7 +21,7 @@ import pandas as pd
 from matplotlib.colors import LogNorm
 
 SCRATCH = ("/tmp/claude-7051641/-gws-pw-j07-nceo-aerosolfire-rsong-project-cloud-cci/"
-           "3a1e8f12-6f9c-4529-9d79-b8ab9052e120/scratchpad/cotw_phase.parquet")
+           "3a1e8f12-6f9c-4529-9d79-b8ab9052e120/scratchpad/cotw_phase_ctt.parquet")
 OUT = Path("figures/slstr_cot_water_2025-12")
 
 
@@ -91,10 +91,20 @@ def main() -> int:
         axd.text(i, v + 0.4, f"{v:.0f}%", ha="center", fontsize=9)
     oc = 100 * d.loc[d["lsflag_orac"] < 0.5, "ice"].mean()
     la = 100 * d.loc[d["lsflag_orac"] >= 0.5, "ice"].mean()
-    axd.text(0.04, 0.96, f"by surface:\n  sea-ice ocean {oc:.0f}%\n  ice-sheet land {la:.0f}%",
-             transform=axd.transAxes, va="top", ha="left", fontsize=9,
+    # control: NOT driven by cloud-top temperature (all clouds supercooled)
+    ct_note = ""
+    if "ctt_orac" in d.columns:
+        cc = d[np.isfinite(d["ctt_orac"])].copy()
+        cc["ice"] = cc["phase_orac"] == 2
+        cold = 100 * cc.loc[cc["ctt_orac"] - 273.15 < -25, "ice"].mean()
+        warm = 100 * cc.loc[(cc["ctt_orac"] - 273.15 >= -25), "ice"].mean()
+        ct_note = (f"\n\nNOT cloud-temperature:\n  all supercooled (−30..0 °C)\n"
+                   f"  <−25 °C {cold:.0f}% ≈ ≥−25 °C {warm:.0f}%")
+    axd.text(0.04, 0.97, f"by surface:\n  sea-ice ocean {oc:.0f}%\n  ice-sheet land {la:.0f}%"
+             + ct_note, transform=axd.transAxes, va="top", ha="left", fontsize=8.5,
              bbox=dict(fc="white", ec="0.7", alpha=0.9))
-    axd.set_title("(d) Misclassification rises with solar-zenith angle", fontsize=10.5)
+    axd.set_title("(d) Driven by retrieval geometry (SZA, surface) — not temperature",
+                  fontsize=10.5)
     axd.grid(axis="y", alpha=0.3)
 
     fig.suptitle("Water-COT: the +3 bias is a phase-misclassification artefact, "

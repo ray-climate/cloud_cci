@@ -105,11 +105,16 @@ qc_strict, daytime profiles (N = 185 288):
 - **(c)** The all-stratum +2.93 is just the weighted mean:
   0.78 × (−0.81) + 0.22 × (+16.3) ≈ +2.9 — **the entire bias is carried by the
   22 % misclassified subset**.
-- **(d) What drives the misclassification** — it is a physically-expected polar
-  failure of passive phase discrimination: the rate **more than doubles with
+- **(d) What drives the misclassification — retrieval geometry, not cloud
+  temperature.** Augmenting the matches with ORAC cloud-top temperature shows
+  these are *all* supercooled-liquid clouds (−30 to 0 °C), and the
+  misclassification rate is **flat across that range** (20 % below −25 °C ≈ 23 %
+  above) — so it is **not** a "cold top read as ice" effect. Instead it tracks
+  where the passive retrieval is *hardest*: the rate **more than doubles with
   solar-zenith angle** (13 % at SZA < 65° → 25 % at 70–75°) and is worse over
-  **sea-ice ocean (28 %)** than the ice sheet (18 %). Cold supercooled-liquid
-  cloud tops at low sun are read as ice.
+  bright **sea-ice ocean (28 %)** than the ice sheet (18 %). It is a low-sun /
+  bright-surface retrieval-difficulty effect on a genuinely supercooled-liquid
+  population.
 
 **Conclusion:** ORAC's **liquid** τ retrieval is accurate here (−0.81); the
 headline +3 is a **phase-classification** limitation, not an optical-depth error.

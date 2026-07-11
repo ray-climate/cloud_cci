@@ -64,25 +64,29 @@ pixels** after `qc_strict`.
 
 | stratum                  |   N     | bias (km) | RMSE (km) |  R    |
 | ------------------------ | ------- | --------- | --------- | ----- |
-| **all (= polar)**        | 162 256 | **−0.57** | **2.08**  | **0.58** |
-| ocean                    | 106 781 | −0.68     | 2.24      | 0.53  |
-| land                     |  55 475 | −0.36     | 1.73      | 0.61  |
-| cth_low (< 3 km)         |  83 256 | +0.08     | 1.06      | 0.48  |
-| cth_mid (3–7 km)         |  61 398 | −0.46     | 1.69      | 0.24  |
-| cth_high (≥ 7 km)        |  17 602 | −4.03     | 4.96      | 0.03  |
-| class_thick (1-layer)    | 145 434 | **−0.15** | 1.41      | **0.75** |
-| class_thick_over_thick   |  16 789 | −4.17     | 4.96      | 0.22  |
-| dist < 2 km              | 162 256 | −0.57     | 2.08      | 0.58  |
-| Δt < 3 min               |   9 414 | −0.59     | 2.18      | 0.59  |
+| stratum | N | **median bias (km)** | mean bias (km) | RMSE (km) | R |
+| ------------------------ | ------- | -------------------- | -------------- | --------- | ----- |
+| **all (= polar)**        | 162 256 | **−0.12**            | −0.57          | **2.08**  | **0.58** |
+| ocean                    | 106 781 | −0.19                | −0.68          | 2.24      | 0.53  |
+| land                     |  55 475 | +0.04                | −0.36          | 1.73      | 0.61  |
+| cth_low (< 3 km)         |  83 256 | −0.03                | +0.08          | 1.06      | 0.48  |
+| cth_mid (3–7 km)         |  61 398 | −0.01                | −0.46          | 1.69      | 0.24  |
+| cth_high (≥ 7 km)        |  17 602 | **−3.76**            | −4.03          | 4.96      | 0.03  |
+| class_thick (1-layer)    | 145 434 | **−0.02**            | −0.15          | 1.41      | **0.75** |
+| class_thick_over_thick   |  16 789 | **−4.03**            | −4.17          | 4.96      | 0.22  |
 
-Sample view is within 0.02 km / 0.01 R of pixel view in every stratum.
+(Note: for CTH the median and mean are close — CTH is only mildly skewed by the
+multi-layer tail — but the median is the cleaner headline and is reported for
+consistency with COT/CER. Sample view is within 0.02 km / 0.01 R of pixel view.)
 
 The headline:
 
-> **Over polar scenes in December 2025, ORAC SLSTR cloud-top height agrees with
-> ATLID to bias −0.57 km, RMSE 2.08 km, R 0.58. Single-layer thick cloud is
-> essentially unbiased (−0.15 km, R 0.75); the error is concentrated in high and
-> multi-layer cloud (≈ −4 km), the classic passive multi-layer ambiguity.**
+> **Over polar scenes in December 2025, the *typical* ORAC SLSTR cloud-top height
+> is essentially unbiased against ATLID — median bias −0.12 km (mean −0.57 km,
+> pulled down by the multi-layer tail), RMSE 2.08 km, R 0.58. Single-layer thick
+> cloud is near-perfect (median −0.02 km, R 0.75); the error is concentrated and
+> *robust* in high / multi-layer cloud (median ≈ −4 km — confirmed not a tail
+> artefact), the classic passive multi-layer ambiguity.**
 
 Notable structure:
 

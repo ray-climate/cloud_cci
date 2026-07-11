@@ -170,7 +170,9 @@ def scatter_panel(
         if n >= 2:
             im = _density_image(ax, d2[x].values, d2[y].values)
             _attach_colorbar(fig, ax, im, label="count")
-        _stat_text(ax, n, bias, rmse, r)
+        _stat_text(ax, n, bias, rmse, r,
+                   median_bias=(float((d2[y] - d2[x]).median()) if n >= 2 else None),
+                   median_ci=(median_ci95(d2[y] - d2[x]) if n >= 2 else None))
         ax.set_title(label, pad=6)
     if suptitle:
         fig.suptitle(suptitle, fontsize=11, y=1.02)
@@ -292,7 +294,9 @@ def scatter_compare(
         if n >= 2:
             im = _density_image(ax, d2[x].values, d2[y].values)
             _attach_colorbar(fig, ax, im, label="count")
-        _stat_text(ax, n, bias, rmse, r)
+        _stat_text(ax, n, bias, rmse, r,
+                   median_bias=(float((d2[y] - d2[x]).median()) if n >= 2 else None),
+                   median_ci=(median_ci95(d2[y] - d2[x]) if n >= 2 else None))
         ax.set_title(label, pad=6)
     if suptitle:
         fig.suptitle(suptitle, fontsize=11, y=1.02)

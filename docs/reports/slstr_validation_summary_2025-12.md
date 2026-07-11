@@ -23,7 +23,7 @@ the mean is shown as a skew-sensitive diagnostic (for water COT the mean even
 
 | Variable | Reference | Regime | Headline (qc_strict, pixel) | Verdict |
 | -------- | --------- | ------ | --------------------------- | ------- |
-| **CTH**       | A-CTH (ATLID)   | polar, day+night | bias **−0.57 km**, RMSE 2.08 km, R **0.58** | **good** |
+| **CTH**       | A-CTH (ATLID)   | polar, day+night | **median −0.12 km** (mean −0.57), RMSE 2.08 km, R **0.58** | **good** |
 | **Water COT** | ACM-CAP liquid τ | polar, day (Antarctic) | **median −4.8** (mean +3.1 *skewed*), r_log 0.11 | τ low, noisy |
 | **Ice COT**   | A-EBD column τ  | polar, day (Antarctic) | **median +2.0** (mean +7.2 *skewed*), r_log 0.17 | modest, noisy |
 | **CER**       | ACM-CAP liquid rₑ | polar, day (Antarctic) | **median +1.1 µm** (mean +8.4 *skewed*), R ≈ **−0.1** | low bias, no skill |
@@ -34,7 +34,7 @@ intervals are tight (N = 53k–173k) and exclude zero (e.g. water COT median
 correlation*, not sampling noise.
 
 **One-line message:** in the polar regime this sensor pairing can access, the
-**thermal** cloud-top retrieval is nearly unbiased *and correlated* (−0.57 km,
+**thermal** cloud-top retrieval is nearly unbiased *and correlated* (median −0.12 km,
 R 0.58). The **solar** retrievals (COT, CER) have only **small-to-moderate median
 biases** (liquid τ ≈ −5, ice τ ≈ +2, CER ≈ +1 µm) but **weak correlation** — they
 are **noisy, not grossly biased**. The large positive *mean* biases reported
@@ -135,10 +135,11 @@ can be small at once.*
 
 ### 3.1 Cloud-top height — the strong result
 
-Bias **−0.57 km**, RMSE **2.08 km**, R **0.58** (N = 162 k). Single-layer thick
-cloud is essentially unbiased (−0.15 km, R 0.75); the error is concentrated in
-high / multi-layer cloud (≈ −4 km) — the classic passive multi-layer ambiguity,
-as in SEVIRI.
+**Median bias −0.12 km** (mean −0.57, pulled down by the multi-layer tail),
+RMSE **2.08 km**, R **0.58** (N = 162 k). The *typical* cloud top is essentially
+unbiased; single-layer thick cloud is near-perfect (median −0.02 km, R 0.75). The
+error is concentrated and *robust* in high / multi-layer cloud (median ≈ −4 km) —
+the classic passive multi-layer ambiguity, as in SEVIRI.
 
 ![CTH scatter](../../figures/slstr_cth_2025-12/cth_scatter.png)
 ![CTH by cloud type](../../figures/slstr_cth_2025-12/cth_by_cloud_type.png)

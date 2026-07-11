@@ -159,6 +159,17 @@ locks onto the lower optically-thick top and misses the upper one, the classic
 passive-IR multi-layer ambiguity. This is not a polar or collocation effect
 (geometry strata are flat); it is intrinsic to passive cloud-top retrieval.
 
+**Why high cloud (≥ 7 km) is also −4 km.** The high-cloud bin is ~50/50 two
+populations, both underestimated (ORAC median 4.8 km vs ATLID 8.8 km): (i) ~48 %
+is thick-over-thick multi-layer — the lower-deck effect above; (ii) ~52 % is high
+*thick single-layer*, underestimated for a distinct reason — passive IR senses
+the level where the cloud reaches optical depth ≈ 1 from the top, which for high,
+cold, diffuse/cirrus-graded tops sits well below the lidar-detected geometric top,
+and near the low polar tropopause the (near-isothermal) temperature→height
+conversion amplifies the offset. Low stratus has a sharp opaque top and a steep
+lapse rate, so the same offset is negligible — which is why low cloud is unbiased
+while high cloud is not.
+
 ## 4. Figures
 
 All under `figures/slstr_cth_2025-12/` (full month) and

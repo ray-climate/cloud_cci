@@ -23,13 +23,13 @@ OUT = Path("figures/slstr_cth_2025-12")
 
 # (stratum key, full name, group). Order is bottom→top on the plot.
 ROWS = [
-    ("cth_high", "High  (top ≥ 7 km)",              "Cloud-top height"),
-    ("cth_mid",  "Mid-level  (3–7 km)",             "Cloud-top height"),
-    ("cth_low",  "Low  (top < 3 km)",               "Cloud-top height"),
-    ("class_thick_over_thick", "Thick-over-thick  (multi-layer)", "ATLID cloud class"),
-    ("class_thin_over_thick",  "Thin cirrus over thick",          "ATLID cloud class"),
-    ("class_thin",             "Thin single-layer",               "ATLID cloud class"),
-    ("class_thick",            "Thick single-layer",              "ATLID cloud class"),
+    ("cth_high", "High (≥ 7 km)",         "Cloud-top\nheight"),
+    ("cth_mid",  "Mid (3–7 km)",          "Cloud-top\nheight"),
+    ("cth_low",  "Low (< 3 km)",          "Cloud-top\nheight"),
+    ("class_thick_over_thick", "Thick over thick", "ATLID\ncloud class"),
+    ("class_thin_over_thick",  "Thin over thick",  "ATLID\ncloud class"),
+    ("class_thin",             "Thin single",      "ATLID\ncloud class"),
+    ("class_thick",            "Thick single",     "ATLID\ncloud class"),
 ]
 
 
@@ -105,18 +105,18 @@ def main() -> int:
     for a in ax:
         a.grid(axis="x", alpha=0.3, zorder=0)
 
-    # group labels in the far-left margin (clear of the tick labels)
+    # group labels in the far-left margin (clear of the — now short — tick labels)
     for grp in dict.fromkeys(groups):
         ys = [yy for yy, gg in zip(y, groups) if gg == grp]
-        ax[0].text(-0.46, np.mean(ys), grp, transform=ax[0].get_yaxis_transform(),
-                   rotation=90, va="center", ha="center", fontsize=10,
-                   fontweight="bold", color="#444")
+        ax[0].text(-0.30, np.mean(ys), grp, transform=ax[0].get_yaxis_transform(),
+                   rotation=90, va="center", ha="center", fontsize=9.5,
+                   fontweight="bold", color="#444", linespacing=0.9)
 
     fig.suptitle("ORAC SLSTR cloud-top height by cloud type — December 2025 "
                  "(polar, qc_strict, pixel)\n"
                  "single-layer / low cloud is unbiased; multi-layer & high cloud "
                  "are underestimated by ~4 km", fontsize=12)
-    fig.subplots_adjust(left=0.31, right=0.99, top=0.87, bottom=0.11, wspace=0.08)
+    fig.subplots_adjust(left=0.22, right=0.99, top=0.87, bottom=0.11, wspace=0.08)
     OUT.mkdir(parents=True, exist_ok=True)
     p = OUT / "cth_by_cloud_type.png"
     fig.savefig(p, dpi=140); plt.close(fig)

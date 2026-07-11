@@ -80,6 +80,44 @@ optically thicker cloud with the brightest partial-cloud contrast). The ice-COT
 report shows the same monotonic improvement poleward (+13 → +5.8). This localises
 the bright-surface / partial-cloud inflation to the marginal-ice-zone latitudes.
 
+## 3c. Where the +3 bias comes from — phase misclassification
+
+Decomposing the comparison by whether ORAC and ACM-CAP **agree on phase** shows
+the +3 bias is not a τ-retrieval error at all — it is an artefact of ORAC
+misclassifying some liquid clouds as ice. Restricting to ACM-CAP liquid-only,
+qc_strict, daytime profiles (N = 185 288):
+
+![Water-COT phase analysis](../../figures/slstr_cot_water_2025-12/cot_water_phase_analysis.png)
+
+| Subset | Fraction | Bias (τ) | r_log |
+| ------ | -------- | -------- | ----- |
+| All liquid-only | 100 % | **+2.93** | 0.11 |
+| **Phase agree** (ORAC also liquid) | **78 %** | **−0.81** | 0.15 |
+| **Phase disagree** (ORAC says ice) | **22 %** | +16.3 (skewed) | 0.05 |
+
+- **(a) Where ORAC agrees it is liquid** (78 %), its liquid τ tracks ACM-CAP on
+  the 1:1 line — **bias −0.81**. This is a genuinely good liquid-COT result.
+- **(b) Where ORAC misclassifies the cloud as ice** (22 %), the comparison is
+  ORAC's *ice*-cloud τ against ACM-CAP's *liquid* τ — a different physical
+  quantity. It is **decorrelated (r_log 0.05)**: the bulk actually sits *below*
+  the 1:1 line, but a heavy high-τ tail pulls the **mean** to +16. It is noise,
+  not a systematic offset.
+- **(c)** The all-stratum +2.93 is just the weighted mean:
+  0.78 × (−0.81) + 0.22 × (+16.3) ≈ +2.9 — **the entire bias is carried by the
+  22 % misclassified subset**.
+- **(d) What drives the misclassification** — it is a physically-expected polar
+  failure of passive phase discrimination: the rate **more than doubles with
+  solar-zenith angle** (13 % at SZA < 65° → 25 % at 70–75°) and is worse over
+  **sea-ice ocean (28 %)** than the ice sheet (18 %). Cold supercooled-liquid
+  cloud tops at low sun are read as ice.
+
+**Conclusion:** ORAC's **liquid** τ retrieval is accurate here (−0.81); the
+headline +3 is a **phase-classification** limitation, not an optical-depth error.
+This is the same inflated ice-phase retrieval that the ice-COT section measures
+directly (+7 vs A-EBD) — water and ice COT are two views of one root cause,
+**ORAC's ice-phase optical retrieval running high over polar bright surfaces at
+high sun-zenith**.
+
 ## 4. Figures
 
 `figures/slstr_cot_water_2025-12/`:

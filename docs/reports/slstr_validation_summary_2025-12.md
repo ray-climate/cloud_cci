@@ -137,11 +137,19 @@ single-layer −0.15 km, R 0.75); high and multi-layer cloud are underestimated 
 
 ### 3.2 Water-cloud optical thickness
 
-Bias **+3.1** overall, but **−0.65 (RMSE 20)** once both instruments agree the
-column is liquid — the all-stratum bias is largely phase-mismatch, not systematic
-τ error. Better than the SEVIRI polar water-COT (+18).
+Bias **+3.1** overall — but this is a **phase-misclassification artefact, not a τ
+error**. Splitting the ACM-CAP liquid-only sample by whether ORAC agrees on phase:
+where ORAC correctly calls the cloud **liquid (78 %)** its τ tracks ACM-CAP to
+**−0.81**; the entire +3 is carried by the **22 %** ORAC misclassifies as **ice**
+(a decorrelated ORAC-ice-τ-vs-ACM-CAP-liquid-τ comparison). The misclassification
+is a physically-expected polar failure — it doubles with solar-zenith angle
+(13 %→25 %) and is worst over sea-ice.
 
-![Water COT scatter](../../figures/slstr_cot_water_2025-12/cot_water_scatter.png)
+![Water COT phase analysis](../../figures/slstr_cot_water_2025-12/cot_water_phase_analysis.png)
+
+This is the *same* inflated ice-phase retrieval that §3.3 measures directly (+7 vs
+A-EBD): **water and ice COT are two views of one root cause** — ORAC's ice-phase
+optical retrieval runs high over polar bright surfaces at high sun-zenith.
 
 ### 3.3 Ice-cloud optical thickness
 

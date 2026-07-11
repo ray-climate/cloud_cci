@@ -779,11 +779,11 @@ def cmd_figures(args: argparse.Namespace) -> int:
 
     sample_stats = stratified_stats(base, "cot_atlid", "cot_orac")
     pix_stats = stratified_stats(pix, "cot_atlid", "cot_orac")
-    bias_by_stratum(sample_stats, metric="bias",
-                    title=f"{suptitle} — bias by stratum (sample)",
+    bias_by_stratum(sample_stats, metric="median_bias",
+                    title=f"{suptitle} — median bias by stratum (sample)",
                     out=out_dir / "cot_bias_by_stratum_sample.png")
-    bias_by_stratum(pix_stats, metric="bias",
-                    title=f"{suptitle} — bias by stratum (pixel)",
+    bias_by_stratum(pix_stats, metric="median_bias",
+                    title=f"{suptitle} — median bias by stratum (pixel)",
                     out=out_dir / "cot_bias_by_stratum_pixel.png")
     bias_by_stratum(pix_stats, metric="r",
                     title=f"{suptitle} — R by stratum (pixel)",
@@ -1117,12 +1117,12 @@ def _cmd_water_figures(args, *, mode, var_atlid, var_orac, strata_fn, report_fn,
     sample_stats = stratified_stats(sample, var_atlid, var_orac, strata=strata_fn())
     pixel_stats = stratified_stats(pixel, var_atlid, var_orac, strata=strata_fn())
     water_cloud_figures.bias_by_stratum(
-        sample_stats, metric="bias",
-        title=f"{suptitle} — bias by stratum (sample)",
+        sample_stats, metric="median_bias",
+        title=f"{suptitle} — median bias by stratum (sample)",
         out=out_dir / f"{prefix}_bias_by_stratum_sample.png")
     water_cloud_figures.bias_by_stratum(
-        pixel_stats, metric="bias",
-        title=f"{suptitle} — bias by stratum (pixel)",
+        pixel_stats, metric="median_bias",
+        title=f"{suptitle} — median bias by stratum (pixel)",
         out=out_dir / f"{prefix}_bias_by_stratum_pixel.png")
     water_cloud_figures.bias_by_stratum(
         pixel_stats, metric="r",

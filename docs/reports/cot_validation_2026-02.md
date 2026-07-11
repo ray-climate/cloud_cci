@@ -10,6 +10,15 @@ references:
   the second section, kept compact because the lidar reference has known
   limitations for thick ice cloud (laser attenuation).
 
+> **⚠️ Metric caveat (2026-07):** the bias numbers below are **mean** bias in
+> linear τ. COT is heavy-tailed, so the mean is dominated by a small high-τ tail
+> and can misrepresent (even sign-flip relative to) the typical pixel — as shown
+> in the SLSTR analysis (`docs/reports/slstr_cot_water_2025-12.md §3`). The
+> statistics engine now also emits **`median_bias`** (with 95% CIs); the median is
+> the recommended headline for COT/CER. Re-running `cot-water-evaluate` /
+> `cot-water-figures` here would surface the median for this dataset too — a
+> pending consistency update. Read the mean biases below with that caveat.
+
 ## 1. Water-cloud COT vs ACM-CAP
 
 ### 1.1 Reference data

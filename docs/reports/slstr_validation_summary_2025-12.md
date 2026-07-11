@@ -129,7 +129,11 @@ high / multi-layer cloud (≈ −4 km) — the classic passive multi-layer ambig
 as in SEVIRI.
 
 ![CTH scatter](../../figures/slstr_cth_2025-12/cth_scatter.png)
-![CTH bias by stratum](../../figures/slstr_cth_2025-12/cth_bias_by_stratum_pixel.png)
+![CTH by cloud type](../../figures/slstr_cth_2025-12/cth_by_cloud_type.png)
+
+*Broken out by cloud type: single-layer and low cloud are near-perfect (thick
+single-layer −0.15 km, R 0.75); high and multi-layer cloud are underestimated by
+~4 km.*
 
 ### 3.2 Water-cloud optical thickness
 

@@ -132,6 +132,33 @@ thresholds. Sweeping Δt ∈ {15, 30, 45, 60} min × distance cap ∈ {1, 2, 3} 
   drive the result. (The Δt sweep to 120 min, `figures/slstr_dt_sweep/`, extends
   this — agreement is flat there too.)
 
+## 3c. Results by cloud type
+
+The error is entirely a function of cloud type. Broken out by ATLID cloud class
+and by cloud-top-height band (qc_strict, pixel):
+
+![CTH by cloud type](../../figures/slstr_cth_2025-12/cth_by_cloud_type.png)
+
+| Cloud type | Definition (ATLID) | N | bias (km) | RMSE (km) | R |
+| ---------- | ------------------ | --- | --------- | --------- | --- |
+| **Thick single-layer** | one optically-thick layer | 145 434 | **−0.15** | 1.41 | **0.75** |
+| Thin single-layer | one optically-thin layer only | 0¹ | — | — | — |
+| Thin cirrus over thick | thin cirrus above a thick layer | 33 | −1.13 | 2.52 | 0.72 |
+| **Thick-over-thick** | two optically-thick layers (multi-layer) | 16 789 | **−4.17** | 4.96 | 0.22 |
+| **Low** | cloud-top height < 3 km | 83 256 | **+0.08** | 1.06 | 0.48 |
+| Mid-level | 3–7 km | 61 398 | −0.46 | 1.69 | 0.24 |
+| **High** | cloud-top height ≥ 7 km | 17 602 | **−4.03** | 4.96 | 0.03 |
+
+¹ *Pure thin single-layer cloud has no optically-thick top, so `cth_thick` is
+undefined and the class is empty under the headline (thick-top) reference.*
+
+**The whole CTH story in one line:** ORAC SLSTR retrieves **single-layer and low
+cloud tops essentially perfectly** (thick single-layer −0.15 km, R 0.75; low
+cloud +0.08 km) and **underestimates high / multi-layer cloud by ~4 km** — it
+locks onto the lower optically-thick top and misses the upper one, the classic
+passive-IR multi-layer ambiguity. This is not a polar or collocation effect
+(geometry strata are flat); it is intrinsic to passive cloud-top retrieval.
+
 ## 4. Figures
 
 All under `figures/slstr_cth_2025-12/` (full month) and

@@ -186,6 +186,18 @@ than tracking the true particle size.
 
 ![CER scatter](../../figures/slstr_cer_water_2025-12/cer_water_scatter.png)
 
+### 3.5 Liquid water path — the saturation reaches the water budget
+
+**Median bias −16 g/m² (−34 %)**, mean +28 (skewed), r_log 0.02. Validated against
+an *independent* reference — ACM-CAP's radar+lidar `liquid_water_content`
+integrated to LWP, not a τ-derived quantity. ORAC liquid water path runs a third
+low (30 vs 47 g/m²), decorrelated, and worse over ice sheet (−18) than ocean
+(−13). Since `cwp ≈ (5/9) ρ_w τ r_e` and CER is unbiased, this is the τ saturation
+(§3.2) **propagating into the water budget** — confirmed by a reference that never
+sees τ. It is fixed by the same surface-albedo advance, not a CWP-specific change.
+
+![CWP validation](../../figures/slstr_cwp_2025-12/cwp_validation.png)
+
 ---
 
 ## 4. Cross-cutting findings (from the refined stratification)
@@ -226,17 +238,22 @@ the aggregate hid:
 | Collocation strategy + case study + sensitivity | ✅ done |
 | Stratification: ocean/land · polar sub-bands · hemisphere · distance · time · cloud-class · phase | ✅ done |
 | **Surface type** (sea-ice / snow / ice-sheet / open water) | ✅ done (§3e — the surface, not the phase) |
-| **CWP** (last synergy variable) | ⏳ next |
+| **CWP** (last synergy variable) | ✅ done (§3.5 — LWP −34 %, inherits τ saturation) |
 | Phase & cloud-mask (categorical) | ⚪ needs A-FM download |
 | Per-orbit case studies, uncertainty validation | ⚪ optional depth |
 
 **Data ceilings (cannot be closed):** low latitudes (orbital mechanics);
 multi-season (only Dec 2025 processed); Sentinel-3B (not processed).
 
-**Assessment:** the two most important variables (CTH, COT) plus CER and the full
-collocation methodology are complete, defensible and meeting-ready. Completing the
-surface-type + CWP step (§9 of the workplan) would make it comprehensive across
-the synergy-available variables.
+**Assessment:** all synergy-available variables (CTH, water & ice COT, CER, CWP)
+plus the full collocation methodology, surface-type stratification and phase-skill
+analysis are complete, defensible and meeting-ready. The single unifying result —
+the passive solar optical-depth saturation over the bright polar cryosphere, which
+propagates into water path and decorrelates over sea-ice/ice-sheet while sparing
+open water — is now demonstrated four independent ways (τ-binning §3d, surface
+split §3e, CER robustness, independent water-path reference §3f). The remaining
+open item is categorical phase/cloud-mask validation (needs an A-TC/A-FM
+download), which would close the ice-detection (POD_ice) side of §3.2.
 
 ---
 

@@ -235,6 +235,39 @@ provides a robust *droplet size* but a saturated, decorrelated optical depth.
 Improving polar liquid τ therefore requires a surface-albedo / snow-BRDF advance,
 not a phase or QC fix.
 
+## 3f. Liquid water path — the τ saturation propagates into the water budget
+
+The last synergy variable. ORAC's `cwp` (total cloud water path, g m⁻²) is
+compared against an **independent** ACM-CAP reference — the radar+lidar
+`liquid_water_content` profile integrated to a liquid water path (LWP), *not* a
+τ-derived quantity — for the phase-agree liquid, qc_strict, daytime sample. Each
+matched pixel is joined to its ACM-CAP profile by `ec_time` (exact match, |Δt| =
+0 s).
+
+![CWP validation](../../figures/slstr_cwp_2025-12/cwp_validation.png)
+
+| stratum | N | ORAC median | ACM-CAP median | **median bias** | mean bias | r_log |
+| ------- | -- | ----------- | -------------- | --------------- | --------- | ----- |
+| all (phase-agree liquid) | 145 k | 30 | 47 | **−16** (−34 %) | +28 | 0.02 |
+| ocean (sea-ice / water)  |  54 k | — | — | −13 | — | — |
+| snow / ice-sheet         |  90 k | — | — | −18 | — | — |
+
+- **ORAC underestimates liquid water path by ~one third on the median** (30 vs
+  47 g m⁻²) — the *same signature as the optical depth*: a median underestimate, a
+  mean flipped positive (+28) by a high-LWP tail, and **zero correlation**
+  (r_log 0.02). Because `cwp ≈ (5/9) ρ_w τ r_e` and CER is unbiased (§3e), the
+  water-path deficit is **inherited directly from the τ saturation** (§3d) — now
+  confirmed against a water-content reference that never sees τ.
+- **The deficit is worse over the ice sheet (−18) than the ocean (−13)** — the
+  same bright-surface ordering as the COT (§3e), closing the loop: the polar
+  liquid-water *budget* retrieved by ORAC runs low wherever the surface is bright.
+
+**Meaning for users:** SLSTR ORAC liquid water path over the polar cryosphere is
+biased low by ~30 % and carries no pixel-level skill — a direct water-budget
+consequence of the passive optical-depth saturation, not an independent CWP
+problem. It is fixed by the same surface-albedo advance, not by a CWP-specific
+change.
+
 ## 4. Figures
 
 `figures/slstr_cot_water_2025-12/`:
@@ -249,6 +282,9 @@ not a phase or QC fix.
 - `../slstr_surface_2025-12/surface_type_bias.png` — median bias / r by surface
   type (open water · sea-ice · snow-ice-sheet) for water-COT, CER and ice-COT
   (§3e). The open-water positive correlation for water-COT is the standout panel.
+- `../slstr_cwp_2025-12/cwp_validation.png` — ORAC `cwp` vs ACM-CAP LWP scatter
+  and surface-stratified water-path bias (§3f): density ridge below 1:1, worse
+  over ice sheet.
 
 ## 5. Conclusions
 
@@ -266,11 +302,16 @@ not a phase or QC fix.
 4. **CER is surface-robust** (median +0.2/+0.3 µm over sea-ice/ice sheet): the
    `new_snowice` build gives trustworthy droplet size over the cryosphere even
    where it cannot constrain optical depth.
-5. Combined message across the variables: **thermal CTH is excellent in the polar
+5. **The saturation propagates into the water budget** (§3f): validated against an
+   independent radar+lidar water-path reference, ORAC liquid water path runs ~34 %
+   low on the median (30 vs 47 g m⁻²), decorrelated, worse over ice sheet — a
+   direct consequence of the τ saturation, not a separate CWP problem.
+6. Combined message across the variables: **thermal CTH is excellent in the polar
    regime (−0.57 km); the solar optical-depth retrievals are surface-limited** —
    ice COT inflated (+7, bright ice sheet), water COT saturated/decorrelated over
-   the cryosphere and only usable over the rare open-water pixels. Improving polar
-   liquid τ needs a surface-albedo / snow-BRDF advance, not a phase or QC fix.
+   the cryosphere and only usable over the rare open-water pixels; liquid water
+   path inherits the deficit. Improving polar liquid τ (and hence CWP) needs a
+   surface-albedo / snow-BRDF advance, not a phase or QC fix.
 
 ## 6. Reproducibility
 
@@ -293,3 +334,14 @@ python -m validation cot-water-figures \
 Inputs: ACM-CAP under `earthcare_data/ACM_CAP_2B/2025/12/`; ORAC SLSTR L2 under
 `/gws/ssde/j25a/cloud_ecv/data_out/slstr/v5.1_new_snowice/slstra/l2b/2025/12/`.
 Daytime restriction via `scripts/slstr_filter_day.py` (`illum_orac == 1`).
+
+Surface-type (§3e) and CWP (§3f) reuse the day matches without re-collocating:
+
+```bash
+# augment matched pixels with ORAC stemp+cwp, then stratify by surface type
+python scripts/slstr_surface_augment.py
+python scripts/slstr_surface_type_figure.py         # -> figures/slstr_surface_2025-12/
+# build the CWP pair (ORAC cwp vs ACM-CAP integrated LWP), match by ec_time
+python scripts/slstr_cwp_augment.py
+python scripts/slstr_cwp_figure.py                  # -> figures/slstr_cwp_2025-12/
+```

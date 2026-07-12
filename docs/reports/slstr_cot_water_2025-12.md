@@ -128,10 +128,13 @@ qc_strict, daytime profiles (N = 185 288):
 correctly identifies **78 %** of ACM-CAP-confirmed liquid clouds as liquid
 (POD_liquid; N = 185 658). This skill **degrades with sun-zenith** (87 % at
 SZA < 65° → 75 % at 70–75°) and is **worse over sea-ice ocean (72 %) than the ice
-sheet (82 %)**. *Caveat:* the synergy matches carry only ACM-CAP's liquid
-classification, so **ice-detection skill cannot be scored here** — a full two-way
-phase validation needs A-TC (ATLID target classification, not yet downloaded) or a
-fuller phase collocation. That is a recommended follow-on.
+sheet (82 %)**. *This one-way, liquid-only estimate has since been superseded* by a
+full two-way contingency against **A-TC** (ATLID Target Classification) —
+`docs/reports/slstr_phase_2025-12.md`. With that proper reference **POD_liquid =
+89.5 %** and, for the first time, **POD_ice = 62.4 %**: ORAC misclassifies **38 % of
+ice cloud tops as liquid**, a larger and more consequential error than the
+liquid→ice confusion discussed here. The liquid bias is the same mechanism, now
+measured on both sides.
 
 **Two stacked effects (not one).** Note this section (phase) and §3d (saturation)
 are *different*: even where phase agrees, ORAC's liquid τ still under-reads on the

@@ -198,6 +198,25 @@ sees τ. It is fixed by the same surface-albedo advance, not a CWP-specific chan
 
 ![CWP validation](../../figures/slstr_cwp_2025-12/cwp_validation.png)
 
+### 3.6 Cloud mask & phase — the two-way contingency (vs A-TC)
+
+Categorical validation against **EarthCARE A-TC** (ATLID Target Classification) —
+the purpose-built phase reference that ACM-CAP's liquid-centric flags could not
+provide (POD_ice was previously unmeasurable). N = 614 k pixels, 230 k cloudy.
+
+- **Cloud mask:** POD 0.69, FAR 0.11, accuracy 0.79. Conservative (under-calls
+  cloud); the missed 31 % is **88 % thin cirrus** the lidar sees and a passive
+  imager cannot — the irreducible passive limit, not a defect.
+- **Phase:** **POD_liquid 89.5 %, POD_ice 62.4 %** (accuracy 77 %). ORAC has a
+  **liquid bias** — it calls 38 % of ice cloud tops "liquid". This is *intrinsic*
+  (surface-independent, unlike the τ saturation) and is the mechanism behind the
+  high-τ tail that flips the mean water-COT bias positive (§3.2).
+- Polar liquid is **~100 % supercooled**; ORAC handles it well (89.5 %).
+
+Full detail: `docs/reports/slstr_phase_2025-12.md`.
+
+![Phase contingency](../../figures/slstr_phase_2025-12/phase_contingency.png)
+
 ---
 
 ## 4. Cross-cutting findings (from the refined stratification)
@@ -239,7 +258,7 @@ the aggregate hid:
 | Stratification: ocean/land · polar sub-bands · hemisphere · distance · time · cloud-class · phase | ✅ done |
 | **Surface type** (sea-ice / snow / ice-sheet / open water) | ✅ done (§3e — the surface, not the phase) |
 | **CWP** (last synergy variable) | ✅ done (§3.5 — LWP −34 %, inherits τ saturation) |
-| Phase & cloud-mask (categorical) | ⚪ needs A-FM download |
+| Phase & cloud-mask (categorical, vs A-TC) | ✅ done (§3.6 — POD_ice 62 %, POD_liq 90 %) |
 | Per-orbit case studies, uncertainty validation | ⚪ optional depth |
 
 **Data ceilings (cannot be closed):** low latitudes (orbital mechanics);
@@ -251,9 +270,12 @@ analysis are complete, defensible and meeting-ready. The single unifying result 
 the passive solar optical-depth saturation over the bright polar cryosphere, which
 propagates into water path and decorrelates over sea-ice/ice-sheet while sparing
 open water — is now demonstrated four independent ways (τ-binning §3d, surface
-split §3e, CER robustness, independent water-path reference §3f). The remaining
-open item is categorical phase/cloud-mask validation (needs an A-TC/A-FM
-download), which would close the ice-detection (POD_ice) side of §3.2.
+split §3e, CER robustness, independent water-path reference §3f). Categorical
+cloud-mask and phase validation against A-TC (§3.6) closes the ice-detection side
+(POD_ice 62 %), showing a *second, independent* limitation — an intrinsic liquid
+phase bias — distinct from the surface-driven τ saturation. The only remaining
+extensions require new processing (a boreal-summer month for the Arctic;
+Sentinel-3B; other seasons), not further analysis of this sample.
 
 ---
 

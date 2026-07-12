@@ -20,16 +20,23 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import datetime as dt
+
 import h5py
 import numpy as np
 import pandas as pd
 
+from orac.slstr import discover_granules, open_granule
+
 ATC_ROOT = "earthcare_data/ATL_TC__2A"
+SLSTR_ROOT = "/gws/ssde/j25a/cloud_ecv/data_out/slstr/v5.1_new_snowice/slstra/l2b"
 GLOB = "validation_data/slstr_synergy_2025-12_day/matches_synergy_*.csv"
 OUT = ("/tmp/claude-7051641/-gws-pw-j07-nceo-aerosolfire-rsong-project-cloud-cci/"
        "3a1e8f12-6f9c-4529-9d79-b8ab9052e120/scratchpad/atc_phase.parquet")
+PIX_PER_GRAN = 1200 * 1500
 COLS = ["valid_match", "phase_orac", "cldmask_orac", "cot_orac", "lsflag_orac",
-        "sza_orac", "ec_lat", "ec_time", "frame_id"]
+        "sza_orac", "ec_lat", "ec_time", "frame_id",
+        "sev_along_track", "sev_across_track", "sev_pixel_id"]
 
 CLEAR, LIQ_W, LIQ_SC, ICE = 0, 1, 2, 3
 
@@ -114,6 +121,32 @@ def main() -> int:
     if aug.any():
         print(f"profile-match |dt| median {d.loc[aug,'_dt_s'].median():.3f} s, "
               f"max {d.loc[aug,'_dt_s'].max():.3f} s")
+
+    # sample ORAC surface temperature at matched pixels -> surface-type strata
+    d["stemp_orac"] = np.nan
+    d["pixkey"] = (d["sev_pixel_id"] // PIX_PER_GRAN).astype(np.int64)
+    grans = discover_granules(SLSTR_ROOT, dt.datetime(2025, 12, 1), dt.datetime(2026, 1, 1))
+    gmap = {int(g.start_time.strftime("%Y%m%d%H%M")): g for g in grans}
+    ok = 0
+    for pk, grp in d[d["sev_pixel_id"] >= 0].groupby("pixkey"):
+        g = gmap.get(int(pk))
+        if g is None:
+            continue
+        try:
+            ds = open_granule(g, variables=("stemp",))
+            st = np.asarray(ds["stemp"].squeeze(drop=True).values)
+            ds.close()
+        except Exception:
+            continue
+        at = grp["sev_along_track"].astype(int).values
+        ac = grp["sev_across_track"].astype(int).values
+        inb = (at >= 0) & (at < st.shape[0]) & (ac >= 0) & (ac < st.shape[1])
+        vals = np.full(len(grp), np.nan)
+        vals[inb] = st[at[inb], ac[inb]]
+        d.loc[grp.index, "stemp_orac"] = vals
+        ok += 1
+    print(f"stemp sampled from {ok} granules; finite on augmented rows: "
+          f"{100*np.isfinite(d.loc[aug,'stemp_orac']).mean():.0f}%")
     d.to_parquet(OUT)
     print("wrote", OUT)
     return 0

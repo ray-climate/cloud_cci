@@ -81,21 +81,35 @@ Antarctic-summer sample the liquid population is **essentially 100 % supercooled
 supercooled liquid "liquid" **89.5 %** of the time — so the liquid-detection skill is
 really *supercooled*-liquid-detection skill, a demanding regime it handles well.
 
-### 4b. Stratification
+### 4b. Stratification — by surface type (the full cryosphere split)
 
-| stratum | POD_liquid | POD_ice | accuracy | N |
-| ------- | ---------- | ------- | -------- | -- |
-| **all** | 89.5 % | **62.4 %** | 77 % | 229 661 |
-| ocean (sea-ice / water) | 84.5 % | 64.0 % | 77.0 % | 83 242 |
-| snow / ice-sheet | 93.1 % | 61.8 % | 77.3 % | 146 419 |
-| SZA 60–70° | — | 60.7 % | 77.6 % | 115 939 |
-| SZA 70–75° | — | 64.1 % | 76.8 % | 113 722 |
+Using the same `stemp`-based surface classes as the optical-depth analysis (§3e of
+the water-COT report): **open water** (ocean, `stemp` ≥ 271.35 K), **sea-ice**
+(ocean, colder), **snow / ice-sheet** (land). The coarse ocean bin averages the
+first two and hides the contrast, so the full split is the one to read.
 
-- **Ice detection is essentially surface-independent** (POD_ice 62–64 % over both
-  ocean and ice sheet) — the liquid bias is intrinsic to the passive phase
-  discrimination, not a bright-surface effect (unlike the *optical-depth*
-  saturation, which is surface-driven — see water-COT §3e).
-- **Liquid detection is better over the ice sheet** (93 % vs 85 % over ocean).
+| surface | POD_liquid | POD_ice | accuracy | N | A-TC ice-frac |
+| ------- | ---------- | ------- | -------- | -- | ------------- |
+| **open water**     | 91.7 % | **62.2 %** | 78.4 % |  11 098 | 45 % |
+| **sea-ice**        | 83.5 % | **64.4 %** | 76.8 % |  71 996 | 35 % |
+| **snow / ice-sheet** | 93.1 % | **61.8 %** | 77.3 % | 146 419 | 50 % |
+| SZA 60–70° | — | 60.7 % | 77.6 % | 115 939 | — |
+| SZA 70–75° | — | 64.1 % | 76.8 % | 113 722 | — |
+
+- **Ice detection is surface-independent — POD_ice is 62–64 % over *all three*
+  surfaces**, including open water. This is the key result and a **sharp contrast
+  with the optical depth**: over the same open-water pixels where the water-COT
+  *correlation recovered* (r 0.28 vs ~0 on the cryosphere, §3e), the phase skill
+  does **not** recover. So the liquid phase bias is **intrinsic to passive
+  ice/liquid discrimination**, not the bright-surface radiative effect that drives
+  the τ saturation. Two genuinely different limitations.
+- **Liquid detection dips over sea-ice** (83.5 %) vs open water / ice sheet
+  (92–93 %): sea-ice is the one surface where ORAC more often calls a liquid cloud
+  "ice" — plausibly its intermediate brightness/temperature confusing the phase
+  test. This is the only clear surface signal in the phase skill.
+- **Cloud phase composition itself varies by surface** (A-TC ice-fraction 35 % over
+  sea-ice → 50 % over the ice sheet) — more ice cloud over the continent, a
+  cloud-climatology aside, not a retrieval effect.
 - Skill is **flat in sun-zenith** across the available 60–75° range (~77 %).
 
 ## 5. Conclusions
@@ -105,9 +119,10 @@ really *supercooled*-liquid-detection skill, a demanding regime it handles well.
 2. **ORAC has a liquid phase bias**: POD_liquid 89.5 % but **POD_ice 62.4 %** — 38 %
    of ice cloud tops are called liquid. This closes the phase story the COT reports
    left open (POD_ice was unmeasurable from ACM-CAP).
-3. **The liquid bias is intrinsic, not cryospheric** (surface-independent POD_ice),
-   in contrast to the optical-depth saturation which *is* surface-driven — two
-   distinct limitations.
+3. **The liquid bias is intrinsic, not cryospheric**: POD_ice is 62–64 % over open
+   water, sea-ice *and* ice sheet alike (§4b). Over the very open-water pixels where
+   the optical-depth correlation recovered (§3e), phase skill does not — proving the
+   phase bias and the surface-driven τ saturation are two distinct limitations.
 4. **Polar liquid is supercooled**, and ORAC handles it well (89.5 %).
 
 **Link to the optical-depth results:** the 38 % ice→liquid misclassification is the

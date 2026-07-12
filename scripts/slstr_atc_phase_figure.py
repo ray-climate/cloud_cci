@@ -97,18 +97,35 @@ def main() -> int:
         print(f"    SZA {str(b):>12}: acc {100*(g.orac_phase==g.atc_phase).mean():4.1f}%  "
               f"POD_ice {pi:4.1f}%  (N={len(g)})")
 
-    # by surface (ocean vs ice-sheet, via land/sea flag)
-    print("\n  phase skill by surface (lsflag):")
-    both["surf"] = np.where(both["lsflag_orac"] < 0.5, "ocean (sea-ice/water)", "snow / ice-sheet")
-    for s, g in both.groupby("surf"):
+    # by surface type (full cryosphere split: sea-ice / open water / ice-sheet)
+    print("\n  phase skill by surface type (stemp split at 271.35 K):")
+    ocean = both["lsflag_orac"] < 0.5
+    st = both["stemp_orac"]
+    surf = pd.Series(index=both.index, dtype=object)
+    surf[ocean & (st < 271.35)] = "sea-ice"
+    surf[ocean & (st >= 271.35)] = "open water"
+    surf[~ocean] = "snow / ice-sheet"
+    both["surf"] = surf
+    surf_order = ["open water", "sea-ice", "snow / ice-sheet"]
+    surf_pod = {}
+    for s in surf_order:
+        g = both[both["surf"] == s]
+        if not len(g):
+            continue
         liq = g[g.atc_phase == "liquid"]; ice = g[g.atc_phase == "ice"]
         pl = (liq.orac_phase == "liquid").mean()*100 if len(liq) else np.nan
         pi = (ice.orac_phase == "ice").mean()*100 if len(ice) else np.nan
-        print(f"    {s:22s}: POD_liq {pl:4.1f}%  POD_ice {pi:4.1f}%  "
-              f"acc {100*(g.orac_phase==g.atc_phase).mean():4.1f}%  (N={len(g)})")
+        icefrac = 100*(g.atc_phase == "ice").mean()   # cloud composition per surface
+        surf_pod[s] = (pl, pi, len(g))
+        print(f"    {s:18s}: POD_liq {pl:4.1f}%  POD_ice {pi:4.1f}%  "
+              f"acc {100*(g.orac_phase==g.atc_phase).mean():4.1f}%  "
+              f"(N={len(g):>6}, A-TC ice-frac {icefrac:.0f}%)")
+    nan_s = both["surf"].isna().sum()
+    if nan_s:
+        print(f"    (stemp missing on {nan_s} rows -> unclassified)")
 
     # ---- figure ----
-    fig, ax = plt.subplots(1, 2, figsize=(12.5, 5))
+    fig, ax = plt.subplots(1, 3, figsize=(17.5, 5))
     # (a) phase confusion matrix, column-normalised so the diagonal == POD
     cm = ct.reindex(index=["liquid", "ice"], columns=["liquid", "ice"]).fillna(0).values
     cmn = 100 * cm / cm.sum(axis=0, keepdims=True)   # per-truth-column
@@ -137,6 +154,26 @@ def main() -> int:
     ax[1].set_title(f"(b) Cloud mask vs A-TC\nPOD {m['POD']:.2f}  FAR {m['FAR']:.2f}  "
                     f"acc {m['accuracy']:.2f}")
     ax[1].set_ylabel("pixels")
+
+    # (c) POD_liquid / POD_ice by surface type — the answer to "does phase skill
+    #     depend on surface?"  POD_ice is flat; POD_liquid dips over sea-ice.
+    slist = [s for s in surf_order if s in surf_pod]
+    x = np.arange(len(slist)); w = 0.38
+    pl_v = [surf_pod[s][0] for s in slist]
+    pi_v = [surf_pod[s][1] for s in slist]
+    ax[2].bar(x - w/2, pl_v, w, label="POD_liquid", color="#c0392b", edgecolor="0.3")
+    ax[2].bar(x + w/2, pi_v, w, label="POD_ice", color="#4a90d9", edgecolor="0.3")
+    for xi, (pl, pi, nn) in zip(x, [surf_pod[s] for s in slist]):
+        ax[2].text(xi - w/2, pl + 1, f"{pl:.0f}", ha="center", fontsize=9)
+        ax[2].text(xi + w/2, pi + 1, f"{pi:.0f}", ha="center", fontsize=9)
+    ax[2].axhline(pod_ice*100, color="#4a90d9", ls=":", lw=1)
+    ax[2].axhline(pod_liq*100, color="#c0392b", ls=":", lw=1)
+    ax[2].set_xticks(x)
+    ax[2].set_xticklabels([f"{s}\n(N={surf_pod[s][2]//1000}k)" for s in slist], fontsize=8)
+    ax[2].set_ylim(0, 100); ax[2].set_ylabel("POD (%)")
+    ax[2].legend(fontsize=9, loc="lower right")
+    ax[2].set_title("(c) Phase skill by surface type\nPOD_ice flat; POD_liq dips over sea-ice")
+    ax[2].grid(axis="y", alpha=0.3)
 
     fig.suptitle("ORAC SLSTR cloud mask & phase vs EarthCARE A-TC — Antarctic "
                  "daytime, Dec-2025", fontsize=12)

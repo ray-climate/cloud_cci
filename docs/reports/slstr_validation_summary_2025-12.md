@@ -259,6 +259,7 @@ the aggregate hid:
 | **Surface type** (sea-ice / snow / ice-sheet / open water) | ✅ done (§3e — the surface, not the phase) |
 | **CWP** (last synergy variable) | ✅ done (§3.5 — LWP −34 %, inherits τ saturation) |
 | Phase & cloud-mask (categorical, vs A-TC) | ✅ done (§3.6 — POD_ice 62 %, POD_liq 90 %) |
+| **Uncertainty validation** (error-consistency / z-score) | ✅ done (`slstr_uncertainty_2025-12.md` — COT σ calibrated only mid-τ; CTH σ a-priori-capped) |
 | Per-orbit case studies, uncertainty validation | ⚪ optional depth |
 
 **Data ceilings (cannot be closed):** low latitudes (orbital mechanics);

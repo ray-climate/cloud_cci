@@ -38,3 +38,4 @@ orbit/ATLID/atlid_sampled_positions.csv
 
 # Local Claude Code project config — not portable across machines
 .claude/
+.uncertainty_cache/

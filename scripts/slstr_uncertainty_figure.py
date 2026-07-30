@@ -26,15 +26,23 @@ from scipy import stats
 
 CACHE = Path(".uncertainty_cache")
 OUT = Path("figures/slstr_uncertainty_2025-12")
-NAVY = "#1b4f72"; RED = "#c0392b"; BLUE = "#2e6da4"
+NAVY = "#1b4f72"; RED = "#c0392b"; BLUE = "#2e6da4"; GREEN = "#1b7837"
 
 
 def _robust_std(a):
     return (np.percentile(a, 75) - np.percentile(a, 25)) / 1.349
 
 
+def _qq(ax, dl, color, label, lim=4):
+    dl = dl[np.isfinite(dl)]
+    dl = dl[np.abs(dl) < np.percentile(np.abs(dl), 99.5)]  # trim extreme for display
+    qs = np.linspace(0.005, 0.995, 200)
+    ax.plot(stats.norm.ppf(qs), np.quantile(dl, qs), "-", color=color, lw=1.8, label=label)
+
+
 def error_consistency_fig(delta, xref, edges, *, xlabel, title, fname,
-                          xscale="log", clip=6.0):
+                          xscale="log", clip=6.0, split=None,
+                          split_labels=("low", "high")):
     d = pd.DataFrame({"delta": delta, "xref": xref}).replace(
         [np.inf, -np.inf], np.nan).dropna()
     d["b"] = pd.cut(d["xref"], edges)
@@ -47,32 +55,48 @@ def error_consistency_fig(delta, xref, edges, *, xlabel, title, fname,
         rstd.append(_robust_std(g["delta"].values))
         std.append(g["delta"].std())
         ns.append(len(g))
+    centers = np.array(centers)
+    # colour bins by low/high when a split is given
+    bincol = [GREEN if (split is not None and c < split) else
+              (RED if split is not None else BLUE) for c in centers]
 
     fig = plt.figure(figsize=(14, 4.7))
     gs = fig.add_gridspec(1, 3, width_ratios=[1.5, 1, 1])
     ax0 = fig.add_subplot(gs[0]); ax1 = fig.add_subplot(gs[1]); ax2 = fig.add_subplot(gs[2])
 
-    # (a) violins by x_ref bin
+    # (a) violins by x_ref bin, coloured low/high
     pos = np.arange(len(groups))
     ax0.axhspan(-1, 1, color=NAVY, alpha=0.10, zorder=0, label="±1 (ideal 68%)")
     ax0.axhline(0, color="k", lw=0.8)
     vp = ax0.violinplot(groups, positions=pos, showextrema=False, widths=0.85)
-    for b in vp["bodies"]:
-        b.set_facecolor(BLUE); b.set_alpha(0.55); b.set_edgecolor("0.3")
+    for b, c in zip(vp["bodies"], bincol):
+        b.set_facecolor(c); b.set_alpha(0.55); b.set_edgecolor("0.3")
     ax0.plot(pos, [np.median(g) for g in groups], "o", color=NAVY, ms=4, zorder=5)
-    for i, (rs, n) in enumerate(zip(rstd, ns)):
-        ax0.text(i, clip*0.92, f"{rs:.1f}", ha="center", fontsize=7.5, color=RED)
-    ax0.text(-0.4, clip*0.92, "robust\nstd→", ha="right", va="center", fontsize=7, color=RED)
+    for i, rs in enumerate(rstd):
+        ax0.text(i, clip*0.92, f"{rs:.1f}", ha="center", fontsize=7.5,
+                 color=bincol[i])
+    ax0.text(-0.4, clip*0.92, "robust\nstd→", ha="right", va="center", fontsize=7, color="0.3")
+    if split is not None:
+        xb = np.searchsorted(centers, split) - 0.5
+        ax0.axvline(xb, color="0.4", ls="--", lw=1)
+        ax0.text(xb/2, -clip*0.7, split_labels[0].upper(), color=GREEN,
+                 ha="center", fontsize=9, fontweight="bold")
+        ax0.text((xb+len(groups)-0.5)/2, -clip*0.7, split_labels[1].upper(),
+                 color=RED, ha="center", fontsize=9, fontweight="bold")
     ax0.set_xticks(pos)
     ax0.set_xticklabels([f"{c:.1f}" for c in centers], rotation=45, fontsize=8)
     ax0.set_ylim(-clip, clip); ax0.set_xlabel(xlabel); ax0.set_ylabel("normalised discrepancy δ")
     ax0.set_title("(a) δ distribution by reference value")
     ax0.legend(loc="lower right", fontsize=8)
 
-    # (b) per-bin std vs x_ref
+    # (b) per-bin std vs x_ref, with low/high shading
+    if split is not None:
+        ax1.axvspan(min(centers)*0.5, split, color=GREEN, alpha=0.07)
+        ax1.axvspan(split, max(centers)*1.5, color=RED, alpha=0.07)
+        ax1.axvline(split, color="0.4", ls="--", lw=1)
     ax1.axhline(1, color="k", ls="--", lw=1, label="ideal (std=1)")
-    ax1.plot(centers, std, "s-", color=RED, ms=5, label="std")
-    ax1.plot(centers, rstd, "o-", color=BLUE, ms=5, label="robust std (IQR/1.349)")
+    ax1.plot(centers, std, "s-", color="0.45", ms=5, label="std")
+    ax1.plot(centers, rstd, "o-", color=NAVY, ms=5, label="robust std")
     if xscale == "log":
         ax1.set_xscale("log")
     ax1.set_yscale("log")
@@ -80,21 +104,30 @@ def error_consistency_fig(delta, xref, edges, *, xlabel, title, fname,
     ax1.set_title("(b) Is std(δ) ≈ 1?"); ax1.grid(alpha=0.3, which="both")
     ax1.legend(fontsize=8)
 
-    # (c) QQ plot vs standard normal
-    dd = d["delta"].values
-    dd = dd[np.abs(dd) < np.percentile(np.abs(dd), 99.5)]  # trim extreme for the plot
-    qs = np.linspace(0.005, 0.995, 200)
-    ax2.plot(stats.norm.ppf(qs), np.quantile(dd, qs), "-", color=NAVY, lw=1.6)
+    # (c) QQ — split low vs high when requested, else single
     lim = 4
-    ax2.plot([-lim, lim], [-lim, lim], "k--", lw=1, label="N(0,1)")
+    ax2.plot([-lim, lim], [-lim, lim], "k--", lw=1, label="N(0,1) ideal")
+    if split is not None:
+        lo = d.loc[d["xref"] < split, "delta"].values
+        hi = d.loc[d["xref"] >= split, "delta"].values
+        _qq(ax2, lo, GREEN, f"{split_labels[0]} cloud")
+        _qq(ax2, hi, RED, f"{split_labels[1]} cloud")
+        txt = (f"{split_labels[0]}:  std {_robust_std(lo):.1f}  "
+               f"±1 {100*(np.abs(lo)<1).mean():.0f}%\n"
+               f"{split_labels[1]}: std {_robust_std(hi):.1f}  "
+               f"±1 {100*(np.abs(hi)<1).mean():.0f}%")
+        ax2.set_title("(c) Low vs high cloud (QQ)")
+    else:
+        _qq(ax2, d["delta"].values, NAVY, "δ")
+        full = d["delta"].values
+        txt = (f"N={len(full):,}\nmedian {np.median(full):+.2f}\n"
+               f"robust std {_robust_std(full):.2f}\n"
+               f"skew {stats.skew(full):+.1f}  ex-kurt {stats.kurtosis(full):+.1f}\n"
+               f"within ±1: {100*(np.abs(full)<1).mean():.0f}%")
+        ax2.set_title("(c) Normality (QQ)")
     ax2.set_xlim(-lim, lim); ax2.set_ylim(-lim, lim)
     ax2.set_xlabel("standard-normal quantile"); ax2.set_ylabel("δ quantile")
-    ax2.set_title("(c) Normality (QQ)"); ax2.legend(fontsize=8, loc="lower right")
-    full = d["delta"].values
-    txt = (f"N={len(full):,}\nmedian {np.median(full):+.2f}\n"
-           f"robust std {_robust_std(full):.2f}\n"
-           f"skew {stats.skew(full):+.1f}\nex-kurt {stats.kurtosis(full):+.1f}\n"
-           f"within ±1: {100*(np.abs(full)<1).mean():.0f}%")
+    ax2.legend(fontsize=8, loc="lower right")
     ax2.text(0.03, 0.97, txt, transform=ax2.transAxes, va="top", fontsize=8,
              family="monospace", bbox=dict(boxstyle="round", fc="white", ec="0.7"))
 
@@ -143,8 +176,15 @@ def do_cth():
         xlabel="ATLID cloud-top height (km, reference)",
         title="ORAC SLSTR CTH uncertainty consistency vs EarthCARE A-CTH "
               "— informative-σ subset (σ not at 20 km a-priori cap)\n"
-              "δ = (CTH_ORAC − CTH_ATLID) / σ_ORAC",
-        fname="cth_error_consistency.png", xscale="linear", clip=6.0)
+              "δ = (CTH_ORAC − CTH_ATLID) / σ_ORAC · split at 6 km",
+        fname="cth_error_consistency.png", xscale="linear", clip=6.0,
+        split=6.0, split_labels=("low <6 km", "high ≥6 km"))
+    # explicit low/high summary for the report
+    xr = v.cth_atlid_thick_km.values
+    for nm, msk in [("low  (<6 km)", xr < 6), ("high (≥6 km)", xr >= 6)]:
+        g = delta.values[msk]; g = g[np.isfinite(g)]
+        print(f"  {nm}: N={len(g):>6}  median {np.median(g):+.2f}  robust std {_robust_std(g):.1f}"
+              f"  within±1 {100*(np.abs(g)<1).mean():.0f}%")
 
 
 def main():

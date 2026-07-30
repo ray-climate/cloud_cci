@@ -20,6 +20,14 @@ diagnostics:
   errors are not the shape a single sigma can summarise.
 - **mean(delta) ≈ 0?** — a residual bias the uncertainty does not account for.
 
+> **This validates the reported *uncertainty*, not the retrieved *value*.** The two
+> are independent: a retrieval can be accurate on the typical pixel (small median
+> bias, good correlation — as CTH is) yet report **error bars that are too tight**.
+> "Good value" and "honest uncertainty" are different properties; this test only
+> asks the second. So a variable can look best in the bias/correlation validation
+> and still fail here — that is not a contradiction, it is the uncertainty analysis
+> exposing an error tail the median bias hid.
+
 ## 1. What uncertainties are available
 
 | side | source | form |
@@ -64,23 +72,30 @@ ATLID CTH is treated as truth (its precision ≈ one range bin ≪ ORAC's km-lev
 - **The stated σ is largely non-informative:** it is pinned at a **20 km a-priori
   cap for 51 % (raw) / 63 % (corrected) of pixels** — the thermal retrieval added
   no height information there. Only ~36–46 % of pixels carry an informative σ.
-- **On that informative subset** (σ not at the cap), the test still fails hard:
+- **On that informative subset, the story splits cleanly at ~6 km cloud height:**
 
 ![CTH error consistency](../../figures/slstr_uncertainty_2025-12/cth_error_consistency.png)
 
-| ATLID CTH band | robust std(δ) | reading |
-| -------------- | ------------- | ------- |
-| low (1–5 km)   | 1.7–5 | roughly plausible for low tops |
-| high (7–14 km) | **12 → 40** | massively over-confident |
+| cloud | N | median δ | robust std(δ) | within ±1 | σ vs actual \|error\| |
+| ----- | -- | -------- | ------------- | --------- | --------------------- |
+| **low (< 6 km)**  | 55 315 | +0.7 | **2.1** | 34 % | σ 0.24 km vs 0.49 km → **2×** |
+| **high (≥ 6 km)** | 27 893 | **−43** | **60** | 6 % | σ 0.29 km vs 9.7 km → **33×** |
 
-- **std(δ) climbs monotonically with cloud height**, from ~1.7 at 3–5 km to **~40
-  at 14 km**, with δ medians reaching **−5 to −6** and a strong negative skew
-  (−3.7, ex-kurt +18). ORAC places **high thin-cirrus tops too low with
-  unwarranted confidence** — the same missed-cirrus mechanism seen in the
-  cloud-mask validation (88 % of missed cloud is thin ice).
-- **Bottom line:** ORAC's CTH uncertainty is **not a usable per-pixel Gaussian σ** —
-  non-informative (a-priori-capped) for most pixels, and where informative it is
-  reliable only for low cloud and wildly over-confident for high cloud.
+- **Low cloud: ORAC's CTH uncertainty is essentially fine** — δ sits in the ±1 band
+  (robust std ~2, only mildly over-confident, as any retrieval is), and the QQ
+  curve (green, panel c) roughly follows N(0,1). The stated ±0.24 km is close to
+  the actual ±0.49 km error.
+- **High cloud: it is catastrophically over-confident** — ORAC reports ±0.3 km when
+  its top is really ~9.7 km wrong (33×), so δ collapses (robust std 60, only 6 %
+  within ±1, QQ curve in red far off the diagonal). ORAC places **high thin-cirrus
+  tops too low with unwarranted confidence** — the same missed-cirrus mechanism as
+  the cloud-mask validation (88 % of missed cloud is thin ice).
+- **std(δ) climbs monotonically with cloud height** (panel b), from ~1.7 at 3–5 km
+  to ~40 at 14 km — the failure is entirely a *high-cloud* phenomenon.
+- **Bottom line:** ORAC's CTH uncertainty is **trustworthy for low cloud** and
+  **badly over-confident for high cloud** (plus a-priori-capped for the >50 % of
+  pixels it cannot constrain). The large discrepancies come from high cloud, not
+  from the retrieval being uniformly bad.
 
 ## 4. Conclusions
 

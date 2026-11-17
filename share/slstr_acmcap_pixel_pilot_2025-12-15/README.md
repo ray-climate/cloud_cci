@@ -1,7 +1,6 @@
 # SLSTR × EarthCARE ACM-CAP collocation — pilot (15 Dec 2025)
 
-One day of ORAC SLSTR pixels matched to EarthCARE ACM-CAP, to check the format
-is useful before running the whole month. Comments welcome — Rui.
+One day of ORAC SLSTR pixels matched to EarthCARE ACM-CAP.
 
 - `slstr_acmcap_pixels_2025-12-15.csv` — 56,375 rows × 93 columns (on JASMIN
   only: `/gws/pw/j07/nceo_aerosolfire/slstr_v5.1_new_snowice_val/`)

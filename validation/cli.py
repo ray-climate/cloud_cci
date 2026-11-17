@@ -21,15 +21,24 @@ from datetime import datetime, timezone
 from glob import glob
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from .collocate import match_track_to_seviri, open_seviri_at_matches
 from .collocate_slstr import (
     GranuleCatalog, build_granule_catalog, match_track_to_slstr,
 )
+from .collocate_slstr_pixel import (
+    DEFAULT_MAX_PIXEL_DIST_KM, aggregate_pairs_to_pixels, find_pixel_pairs,
+    format_pixel_table,
+)
 from .figures import bias_by_stratum, diagnostic_panel, scatter_panel
-from .readers import read_aebd_track, read_accap_track, read_acth_track
-from .reference import cot_cer_water_from_accap, cot_from_aebd, cth_from_acth
+from .readers import (
+    read_accap_columns, read_aebd_track, read_accap_track, read_acth_track,
+)
+from .reference import (
+    accap_column_properties, cot_cer_water_from_accap, cot_from_aebd, cth_from_acth,
+)
 from .compare_figures import (
     bias_bar_compare, scatter_compare, scatter_compare_by_surface,
 )
@@ -665,6 +674,130 @@ def cmd_slstr_synergy_collocate(args: argparse.Namespace) -> int:
 
 def cmd_slstr_collocate(args: argparse.Namespace) -> int:
     return _run_slstr_collocate(args, "A-EBD", _process_frame_cot_slstr)
+
+
+# ---------------------------------------------------------------------------
+# SLSTR-pixel-based collocation (one row per ORAC pixel; ACM-CAP reduced to it)
+# ---------------------------------------------------------------------------
+
+SLSTR_PIXEL_DEFAULT_MAX_DT_MIN = 60.0
+# ACM-CAP per-profile fields carried through unchanged (besides the column
+# properties from ``accap_column_properties``).
+_ACCAP_PIXEL_MEAN_FIELDS = {
+    "liquid_optical_depth_error": "cot_liquid_lnerr",
+    "ice_water_path_error": "iwp_lnerr",
+    "aerosol_optical_depth": "aod",
+    "cost_function": "cost_function",
+    "elevation": "elevation_m",
+    "tropopause_height": "tropopause_m",
+}
+_ACCAP_PIXEL_FLAGS = (
+    "quality_status", "convergence_status", "synergy_status",
+    "atlid_assim_status", "cpr_assim_status",
+    "msi_sw_assim_status", "msi_lw_assim_status",
+)
+_ACCAP_PIXEL_RANGE = ("cot_total", "cth")
+
+
+def _process_frame_pixel_slstr(
+    path: Path, catalog: GranuleCatalog, max_dt_s: float, max_dist_km: float,
+    out_dir: Path,
+) -> tuple[Path | None, str]:
+    """Collocate one ACM-CAP frame per SLSTR pixel; write pixels_acmcap_<frame_id>.csv."""
+    meta = _frame_metadata(path)
+    if meta is None:
+        return None, "fail"
+    fid = meta[0]
+    out_csv = out_dir / f"pixels_acmcap_{fid}.csv"
+    if out_csv.exists() and out_csv.stat().st_size > 0:
+        return out_csv, "skip"
+    try:
+        track = read_accap_columns(path)
+        pairs = find_pixel_pairs(
+            track["lat"], track["lon"], track["time"], catalog,
+            max_time_diff_seconds=max_dt_s, max_pixel_dist_km=max_dist_km,
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"  [{fid}] failed ({type(e).__name__}): {e}", file=sys.stderr)
+        return None, "fail"
+    if pairs.empty:
+        return None, "empty"
+
+    props = accap_column_properties(track)
+    ec = pd.DataFrame({f"acmcap_{k}": v for k, v in props.items()})
+    for src, name in _ACCAP_PIXEL_MEAN_FIELDS.items():
+        ec[f"acmcap_{name}"] = track[src]
+    ec["acmcap_quality_good_frac"] = (track["quality_status"] == 0).astype(float)
+    mean_cols = [c for c in ec.columns if c != "acmcap_phase_col"]
+    for name in _ACCAP_PIXEL_FLAGS:
+        # -127 is the ACM-CAP integer fill → empty cell.
+        ec[f"acmcap_{name}"] = pd.array(track[name], dtype="Int16")
+        ec.loc[track[name] == -127, f"acmcap_{name}"] = pd.NA
+    ec["acmcap_phase_col"] = pd.array(
+        np.where(np.isfinite(props["phase_col"]), props["phase_col"], -1), dtype="Int16")
+    ec.loc[~np.isfinite(props["phase_col"]), "acmcap_phase_col"] = pd.NA
+    ec["ec_time"], ec["ec_lat"], ec["ec_lon"] = track["time"], track["lat"], track["lon"]
+    nearest_cols = ["ec_time", "ec_lat", "ec_lon", "acmcap_phase_col",
+                    *(f"acmcap_{n}" for n in _ACCAP_PIXEL_FLAGS)]
+
+    pixels = aggregate_pairs_to_pixels(
+        pairs, ec, mean_cols=mean_cols,
+        range_cols=[f"acmcap_{c}" for c in _ACCAP_PIXEL_RANGE],
+        nearest_cols=nearest_cols,
+    )
+    pixels.insert(0, "ec_frame", fid)
+    pixels.insert(1, "ec_file", path.name)
+    lead = ["ec_frame", "ec_file", "ec_index_nearest", "ec_index_first", "ec_index_last",
+            "n_profiles", "ec_time", "ec_lat", "ec_lon",
+            "slstr_granule", "slstr_orbit", "slstr_along_track", "slstr_across_track",
+            "slstr_time", "slstr_lat", "slstr_lon", "distance_km", "dt_s"]
+    pixels = format_pixel_table(pixels[lead + [c for c in pixels.columns if c not in lead]])
+    pixels = pixels.sort_values("ec_index_nearest", kind="stable")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pixels.to_csv(out_csv, index=False, float_format="%.6g",
+                  date_format="%Y-%m-%dT%H:%M:%S.%f")
+    return out_csv, "done"
+
+
+def cmd_slstr_pixel_collocate(args: argparse.Namespace) -> int:
+    start = datetime.fromisoformat(args.start.replace("Z", "+00:00"))
+    end = datetime.fromisoformat(args.end.replace("Z", "+00:00"))
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    max_dt_s = args.max_time_diff_min * 60.0
+
+    frames = _enumerate_frames("ACM-CAP", start, end)
+    print(f"Found {len(frames)} ACM-CAP frames in [{start}, {end})")
+    if not frames:
+        return 0
+    catalog = _load_or_build_slstr_catalog(Path(args.slstr_root), start, end, max_dt_s)
+    if not catalog.granules:
+        print("No SLSTR granules in the run window — nothing to match.", file=sys.stderr)
+        return 1
+
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    counts = {"done": 0, "skip": 0, "empty": 0, "fail": 0}
+    for i, path in enumerate(frames, 1):
+        meta = _frame_metadata(path)
+        fid = meta[0] if meta else "?"
+        _, status = _process_frame_pixel_slstr(
+            path, catalog, max_dt_s, args.max_pixel_dist_km, out_dir)
+        counts[status] += 1
+        marker = {"done": "✓", "skip": "·", "empty": "○", "fail": "✗"}[status]
+        print(f"  [{i:4d}/{len(frames)}] {marker} {fid:>8} → {status}", flush=True)
+    print(f"Summary: {counts}")
+
+    if args.merged:
+        paths = sorted(out_dir.glob("pixels_acmcap_*.csv"))
+        if paths:
+            merged = pd.concat([pd.read_csv(p) for p in paths], ignore_index=True)
+            merged = merged.sort_values(["ec_time", "slstr_time"], kind="stable")
+            merged.to_csv(args.merged, index=False)
+            print(f"Merged {len(paths)} frames → {len(merged)} pixel rows in {args.merged}")
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -1412,6 +1545,21 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Temporal match tolerance in minutes (default 30).")
         sp.add_argument("--out", required=True, help="Per-frame matches CSV directory")
         sp.set_defaults(func=fn)
+
+    px = sub.add_parser(
+        "slstr-pixel-collocate",
+        help="One row per ORAC SLSTR pixel under the EarthCARE track, with "
+             "ACM-CAP column properties reduced to the pixel.")
+    px.add_argument("--start", required=True, help="ISO start, e.g. 2025-12-15")
+    px.add_argument("--end", required=True, help="ISO end (exclusive)")
+    px.add_argument("--slstr-root", default=str(SLSTR_ROOT_DEFAULT))
+    px.add_argument("--max-time-diff-min", type=float, default=SLSTR_PIXEL_DEFAULT_MAX_DT_MIN,
+                    help="Largest |EarthCARE − SLSTR| time kept, minutes (default 60); "
+                         "dt_s is written so tighter cuts are applied afterwards.")
+    px.add_argument("--max-pixel-dist-km", type=float, default=DEFAULT_MAX_PIXEL_DIST_KM)
+    px.add_argument("--out", required=True, help="Per-frame pixel CSV directory")
+    px.add_argument("--merged", help="Also write all frames in --out as one CSV here")
+    px.set_defaults(func=cmd_slstr_pixel_collocate)
 
     for var, ev_fn, fig_fn, cmp_fn, hom_fn in (
         ("cot-water", cmd_cot_water_evaluate, cmd_cot_water_figures, cmd_cot_water_compare, cmd_cot_water_homogeneity),

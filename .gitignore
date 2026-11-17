@@ -39,3 +39,6 @@ orbit/ATLID/atlid_sampled_positions.csv
 # Local Claude Code project config — not portable across machines
 .claude/
 .uncertainty_cache/
+
+# Collocation tables shared with colleagues stay on JASMIN, not in git
+share/**/*.csv

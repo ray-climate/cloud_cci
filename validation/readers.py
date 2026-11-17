@@ -179,3 +179,55 @@ def read_accap_track(path: str | Path) -> dict:
         "ice_water_content": iwc,
         "frame_id": path.stem.split("_")[-1],
     }
+
+
+# Integer status flags use -127 as fill in ACM-CAP.
+_ACCAP_INT_FILL = -127
+
+_ACCAP_PROFILE_FLOATS = (
+    "liquid_optical_depth", "liquid_optical_depth_error",
+    "ice_water_path", "ice_water_path_error",
+    "aerosol_optical_depth", "cost_function", "elevation", "tropopause_height",
+)
+_ACCAP_PROFILE_FLAGS = {
+    "quality_status": "quality_status",
+    "convergence_status": "convergence_status",
+    "synergy_status": "synergy_status",
+    "atlid_assim_status": "ATLID_backscatter_mie_assimilation_status",
+    "cpr_assim_status": "CPR_reflectivity_factor_assimilation_status",
+    "msi_sw_assim_status": "MSI_shortwave_albedo_assimilation_status",
+    "msi_lw_assim_status": "MSI_longwave_brightness_temperature_assimilation_status",
+}
+_ACCAP_BIN_FLOATS = (
+    "height", "temperature",
+    "liquid_extinction", "liquid_effective_radius", "liquid_water_content",
+    "ice_extinction", "ice_effective_radius",
+    "rain_water_content",
+)
+
+
+def read_accap_columns(path: str | Path) -> dict:
+    """Read an ACM_CAP_2B frame with everything needed for column reduction.
+
+    A superset of :func:`read_accap_track` (which stays as-is for the existing
+    water-cloud reports): adds the ice and rain profiles, temperature, the
+    retrieval error fields and all assimilation-status flags. Keys are the
+    ACM-CAP dataset names except the ``*_assim_status`` shorthands.
+
+    Floats are float64 with fill → NaN; integer flags are int16 with the
+    ``-127`` fill preserved. ``time`` is ``datetime64[ns]``.
+    """
+    path = Path(path)
+    out: dict = {"frame_id": path.stem.split("_")[-1]}
+    with h5py.File(path, "r") as f:
+        sd = f["ScienceData"]
+        out["lat"] = np.asarray(sd["latitude"][:], dtype=np.float64)
+        out["lon"] = np.asarray(sd["longitude"][:], dtype=np.float64)
+        t_sec = np.asarray(sd["time"][:], dtype=np.float64)
+        for name in (*_ACCAP_PROFILE_FLOATS, *_ACCAP_BIN_FLOATS):
+            out[name] = _mask_fill(np.asarray(sd[name][:]))
+        for key, name in _ACCAP_PROFILE_FLAGS.items():
+            out[key] = np.asarray(sd[name][:], dtype=np.int16)
+    t_sec_clean = np.where(np.isfinite(t_sec) & (t_sec < 1e30), t_sec, 0.0)
+    out["time"] = _TIME_EPOCH + (t_sec_clean * 1e9).astype("timedelta64[ns]")
+    return out

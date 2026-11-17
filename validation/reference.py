@@ -203,3 +203,119 @@ def cth_from_acth(
     thick_km = np.asarray(cth_thick, dtype=np.float64) / 1000.0
     raw_km = np.asarray(cth_raw, dtype=np.float64) / 1000.0
     return thick_km, raw_km
+
+
+# Extinction above which a bin counts as cloud for the geometric cloud top
+# (~0.001 optical depth per 100 m bin). ACM-CAP reports ice extinction down to
+# ~1e-9 m^-1, far below anything a passive imager responds to.
+ACCAP_CLOUD_EXT_MIN = 1.0e-5
+# Optical depth below cloud top over which the "what a passive sensor sees"
+# quantities (top effective radius, top phase) are weighted.
+ACCAP_TOP_TAU = 1.0
+# Optical depth a species needs before it counts as present in ``phase_col``.
+ACCAP_PHASE_TAU_MIN = 0.01
+
+
+def accap_column_properties(
+    track: dict,
+    cloud_ext_min: float = ACCAP_CLOUD_EXT_MIN,
+    top_tau: float = ACCAP_TOP_TAU,
+) -> dict[str, np.ndarray]:
+    """Reduce ACM-CAP profiles to per-profile column quantities.
+
+    Takes the dict from :func:`validation.readers.read_accap_columns` and
+    returns ``(n_profile,)`` float64 arrays (NaN where undefined). No QC is
+    applied. "Ice" is everything ACM-CAP calls ice (cloud ice + snow).
+
+    Optical depth
+        ``cot_liquid``  ACM-CAP ``liquid_optical_depth`` (its own column value)
+        ``cot_ice``     ∫ ``ice_extinction`` dz
+        ``cot_total``   liquid + ice
+    Effective radius [µm]
+        ``cer_liquid_col`` / ``cer_ice_col``  extinction-weighted over the column
+        ``cer_liquid_top`` / ``cer_ice_top``  weighted over the uppermost
+        ``top_tau`` of *total* optical depth (what a passive sensor responds to)
+    Water path [g m^-2]
+        ``lwp`` (∫ LWC dz), ``iwp`` (ACM-CAP ``ice_water_path``), ``rwp`` (∫ RWC dz)
+    Phase
+        ``ice_frac_top``  ice share of the uppermost ``top_tau`` of optical
+        depth: 0 = liquid top, 1 = ice top
+        ``phase_col``     0 clear, 1 liquid only, 2 ice only, 3 both; a species
+        is present when its optical depth ≥ ``ACCAP_PHASE_TAU_MIN``
+    Cloud top
+        ``cth`` [km]  highest bin with total extinction ≥ ``cloud_ext_min``
+        ``ctt`` [K]   model temperature there
+        ``z_tau1`` [km] / ``t_tau1`` [K]  level where optical depth from the top
+        reaches ``top_tau`` (NaN for thinner columns)
+        Heights are on the ACM-CAP ``height`` grid, not corrected for geoid.
+    """
+    h = track["height"]
+    n = h.shape[0]
+    dz = np.abs(np.diff(h, axis=1))
+    dz = np.concatenate([dz[:, :1], dz], axis=1)
+    dz = np.where(np.isfinite(dz), dz, 0.0)
+
+    def _zero(a: np.ndarray) -> np.ndarray:
+        return np.where(np.isfinite(a) & (a > 0), a, 0.0)
+
+    ext_l, ext_i = _zero(track["liquid_extinction"]), _zero(track["ice_extinction"])
+    re_l, re_i = _zero(track["liquid_effective_radius"]), _zero(track["ice_effective_radius"])
+    tau_l, tau_i = ext_l * dz, ext_i * dz
+    tau = tau_l + tau_i
+    # A profile with no retrieval has fill in every bin of both species.
+    retrieved = (np.isfinite(track["liquid_extinction"]).any(axis=1)
+                 | np.isfinite(track["ice_extinction"]).any(axis=1))
+
+    cot_liquid = track["liquid_optical_depth"]
+    cot_ice = np.where(retrieved, tau_i.sum(axis=1), np.nan)
+    cot_total = np.where(np.isfinite(cot_liquid), cot_liquid, 0.0) + cot_ice
+
+    def _wmean(weight: np.ndarray, value: np.ndarray) -> np.ndarray:
+        den = weight.sum(axis=1)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return np.where(den > 0, (weight * value).sum(axis=1) / den, np.nan)
+
+    # Share of each bin lying within the uppermost `top_tau` (grid is top-down).
+    cum = np.cumsum(tau, axis=1)
+    above = cum - tau
+    with np.errstate(invalid="ignore", divide="ignore"):
+        share = np.where(
+            tau > 0,
+            (np.minimum(cum, top_tau) - np.minimum(above, top_tau)) / tau, 0.0)
+    top_l, top_i = tau_l * share, tau_i * share
+    top_l_sum, top_i_sum = top_l.sum(axis=1), top_i.sum(axis=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        ice_frac_top = np.where(
+            top_l_sum + top_i_sum > 0, top_i_sum / (top_l_sum + top_i_sum), np.nan)
+
+    has_l = tau_l.sum(axis=1) >= ACCAP_PHASE_TAU_MIN
+    has_i = tau_i.sum(axis=1) >= ACCAP_PHASE_TAU_MIN
+    phase_col = np.where(retrieved, has_l * 1.0 + has_i * 2.0, np.nan)
+
+    rows = np.arange(n)
+    cloudy = (ext_l + ext_i) >= cloud_ext_min
+    top_bin = np.argmax(cloudy, axis=1)
+    has_top = cloudy.any(axis=1)
+    reach = cum >= top_tau
+    tau1_bin = np.argmax(reach, axis=1)
+    has_tau1 = reach.any(axis=1)
+    temp = track["temperature"]
+
+    return {
+        "cot_liquid": cot_liquid,
+        "cot_ice": cot_ice,
+        "cot_total": cot_total,
+        "cer_liquid_col": _wmean(tau_l, re_l) * 1e6,
+        "cer_ice_col": _wmean(tau_i, re_i) * 1e6,
+        "cer_liquid_top": _wmean(top_l, re_l) * 1e6,
+        "cer_ice_top": _wmean(top_i, re_i) * 1e6,
+        "lwp": np.where(retrieved, (_zero(track["liquid_water_content"]) * dz).sum(axis=1) * 1e3, np.nan),
+        "iwp": track["ice_water_path"] * 1e3,
+        "rwp": np.where(retrieved, (_zero(track["rain_water_content"]) * dz).sum(axis=1) * 1e3, np.nan),
+        "ice_frac_top": ice_frac_top,
+        "phase_col": phase_col,
+        "cth": np.where(has_top, h[rows, top_bin] / 1e3, np.nan),
+        "ctt": np.where(has_top, temp[rows, top_bin], np.nan),
+        "z_tau1": np.where(has_tau1, h[rows, tau1_bin] / 1e3, np.nan),
+        "t_tau1": np.where(has_tau1, temp[rows, tau1_bin], np.nan),
+    }

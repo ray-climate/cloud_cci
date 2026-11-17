@@ -64,8 +64,12 @@ ACM-CAP is a profile, so each one is reduced to column values:
 
 ## Worth knowing
 
-- ORAC `cth` sits ~2.3 km below ACM-CAP's geometric top but within 0.2 km of
-  `z_tau1`, so `z_tau1` is probably the fairer comparison.
+- ORAC `cth` follows an optical-depth level, not the geometric top. On the same
+  22,755 pixels (ACM-CAP COT ≥ 1, ±60 min) the median difference is −1.6 km
+  against `cth` and +0.2 km against `z_tau1`. The gap to the geometric top is
+  almost all multi-layer scenes: −0.2 km with one cloud layer, −3.6 km with two.
+  The closest level is a little above `z_tau1`, at about 0.3–0.5 optical depth.
+  One day of data, so treat the exact level as provisional.
 - For effective radius I wasn't sure whether column or cloud-top weighting is
   the better match to ORAC, so both are there.
 - No parallax correction.

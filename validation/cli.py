@@ -696,14 +696,58 @@ _ACCAP_PIXEL_FLAGS = (
     "atlid_assim_status", "cpr_assim_status",
     "msi_sw_assim_status", "msi_lw_assim_status",
 )
-_ACCAP_PIXEL_RANGE = ("cot_total", "cth")
+_ACCAP_PIXEL_RANGE = ("cot_total",)
+# A-CTH and ACM-CAP are on different along-track grids (~0.14 s per profile);
+# an A-CTH profile further than this in time from the ACM-CAP one is not used.
+_ACTH_MAX_DT_S = 0.15
+
+
+def _acth_on_accap_profiles(acth_path: Path | None, accap_time: np.ndarray) -> pd.DataFrame:
+    """A-CTH cloud-top fields resampled onto the ACM-CAP profiles of the same frame.
+
+    Nearest A-CTH profile in time; rows are all-missing when the frame has no
+    A-CTH file or no profile within ``_ACTH_MAX_DT_S``.
+    """
+    n = accap_time.size
+    out = pd.DataFrame({
+        "acth_cth_thick_km": np.full(n, np.nan), "acth_cth_km": np.full(n, np.nan),
+        "acth_tropopause_km": np.full(n, np.nan),
+        "acth_quality_status": pd.array([pd.NA] * n, dtype="Int16"),
+        "acth_confidence": pd.array([pd.NA] * n, dtype="Int16"),
+        "acth_cloud_class": pd.array([pd.NA] * n, dtype="Int16"),
+    })
+    if acth_path is None:
+        return out
+    a = read_acth_track(acth_path)
+    order = np.argsort(a["time"])
+    t = a["time"][order].astype("int64")
+    q = accap_time.astype("int64")
+    j = np.clip(np.searchsorted(t, q), 1, t.size - 1)
+    j = np.where(np.abs(q - t[j - 1]) <= np.abs(t[j] - q), j - 1, j)
+    ok = np.abs(q - t[j]) <= _ACTH_MAX_DT_S * 1e9
+    src = order[j[ok]]
+    thick_km, raw_km = cth_from_acth(a["cth_thick"], a["cth_raw"])
+    out.loc[ok, "acth_cth_thick_km"] = thick_km[src]
+    out.loc[ok, "acth_cth_km"] = raw_km[src]
+    out.loc[ok, "acth_tropopause_km"] = a["tropopause_height_wmo"][src] / 1000.0
+    for col, key in (("acth_quality_status", "quality_status"),
+                     ("acth_confidence", "cth_confidence"),
+                     ("acth_cloud_class", "cloud_class")):
+        vals = pd.array(a[key][src].astype(np.int16), dtype="Int16")
+        vals[a[key][src] == -127] = pd.NA
+        out.loc[ok, col] = vals
+    return out
 
 
 def _process_frame_pixel_slstr(
     path: Path, catalog: GranuleCatalog, max_dt_s: float, max_dist_km: float,
-    out_dir: Path,
+    out_dir: Path, acth_path: Path | None = None,
 ) -> tuple[Path | None, str]:
-    """Collocate one ACM-CAP frame per SLSTR pixel; write pixels_acmcap_<frame_id>.csv."""
+    """Collocate one ACM-CAP frame per SLSTR pixel; write pixels_acmcap_<frame_id>.csv.
+
+    ``acth_path`` is the A-CTH file of the same frame (cloud-top height
+    reference); its columns are empty when it is missing.
+    """
     meta = _frame_metadata(path)
     if meta is None:
         return None, "fail"
@@ -736,9 +780,13 @@ def _process_frame_pixel_slstr(
     ec["acmcap_phase_col"] = pd.array(
         np.where(np.isfinite(props["phase_col"]), props["phase_col"], -1), dtype="Int16")
     ec.loc[~np.isfinite(props["phase_col"]), "acmcap_phase_col"] = pd.NA
+    acth = _acth_on_accap_profiles(acth_path, track["time"])
+    acth_flags = ["acth_quality_status", "acth_confidence", "acth_cloud_class"]
+    ec = pd.concat([ec, acth], axis=1)
+    mean_cols += [c for c in acth.columns if c not in acth_flags]
     ec["ec_time"], ec["ec_lat"], ec["ec_lon"] = track["time"], track["lat"], track["lon"]
     nearest_cols = ["ec_time", "ec_lat", "ec_lon", "acmcap_phase_col",
-                    *(f"acmcap_{n}" for n in _ACCAP_PIXEL_FLAGS)]
+                    *(f"acmcap_{n}" for n in _ACCAP_PIXEL_FLAGS), *acth_flags]
 
     pixels = aggregate_pairs_to_pixels(
         pairs, ec, mean_cols=mean_cols,
@@ -779,12 +827,16 @@ def cmd_slstr_pixel_collocate(args: argparse.Namespace) -> int:
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
+    acth_by_frame = {
+        _frame_metadata(p)[0]: p for p in _enumerate_frames("A-CTH", start, end)}
+    print(f"Found {len(acth_by_frame)} A-CTH frames for the cloud-top reference")
     counts = {"done": 0, "skip": 0, "empty": 0, "fail": 0}
     for i, path in enumerate(frames, 1):
         meta = _frame_metadata(path)
         fid = meta[0] if meta else "?"
         _, status = _process_frame_pixel_slstr(
-            path, catalog, max_dt_s, args.max_pixel_dist_km, out_dir)
+            path, catalog, max_dt_s, args.max_pixel_dist_km, out_dir,
+            acth_path=acth_by_frame.get(fid))
         counts[status] += 1
         marker = {"done": "✓", "skip": "·", "empty": "○", "fail": "✗"}[status]
         print(f"  [{i:4d}/{len(frames)}] {marker} {fid:>8} → {status}", flush=True)

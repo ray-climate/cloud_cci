@@ -199,7 +199,7 @@ _ACCAP_PROFILE_FLAGS = {
     "msi_lw_assim_status": "MSI_longwave_brightness_temperature_assimilation_status",
 }
 _ACCAP_BIN_FLOATS = (
-    "height", "temperature",
+    "height",
     "liquid_extinction", "liquid_effective_radius", "liquid_water_content",
     "ice_extinction", "ice_effective_radius",
     "rain_water_content",
@@ -210,8 +210,8 @@ def read_accap_columns(path: str | Path) -> dict:
     """Read an ACM_CAP_2B frame with everything needed for column reduction.
 
     A superset of :func:`read_accap_track` (which stays as-is for the existing
-    water-cloud reports): adds the ice and rain profiles, temperature, the
-    retrieval error fields and all assimilation-status flags. Keys are the
+    water-cloud reports): adds the ice and rain profiles, the retrieval
+    error fields and all assimilation-status flags. Keys are the
     ACM-CAP dataset names except the ``*_assim_status`` shorthands.
 
     Floats are float64 with fill → NaN; integer flags are int16 with the

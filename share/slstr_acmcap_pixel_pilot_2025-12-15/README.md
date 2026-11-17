@@ -1,10 +1,11 @@
-# SLSTR × EarthCARE ACM-CAP collocation — pilot (15 Dec 2025)
+# SLSTR × EarthCARE collocation — pilot (15 Dec 2025)
 
-One day of ORAC SLSTR pixels matched to EarthCARE ACM-CAP.
+One day of ORAC SLSTR pixels matched to EarthCARE ACM-CAP (cloud properties)
+and A-CTH (cloud-top height).
 
-- `slstr_acmcap_pixels_2025-12-15.csv` — 56,375 rows × 93 columns (on JASMIN
+- `slstr_acmcap_pixels_2025-12-15.csv` — 56,375 rows × 91 columns (on JASMIN
   only: `/gws/pw/j07/nceo_aerosolfire/slstr_v5.1_new_snowice_val/`)
-- `quicklook.png` — where the matches are, plus a first ORAC vs ACM-CAP look
+- `quicklook.png` — where the matches are, plus a first ORAC vs EarthCARE look
 
 ## Collocation strategy
 
@@ -13,6 +14,8 @@ One day of ORAC SLSTR pixels matched to EarthCARE ACM-CAP.
   pixel centre, within 1.5 km.
 - If two profiles fall in the same pixel (11% of rows) they are averaged;
   `n_profiles` says how many.
+- A-CTH is on a slightly different along-track grid, so each ACM-CAP profile
+  takes the A-CTH profile nearest in time (same frame, within 0.15 s).
 - **Time window is ±60 min**, and the time difference is saved as `dt_s`
   (EarthCARE − SLSTR, seconds), so you can pick your own threshold.
   ±10 min leaves 15,382 pixels; ±30 min leaves 32,849.
@@ -53,25 +56,28 @@ ACM-CAP is a profile, so each one is reduced to column values:
 |---|---|
 | `cot_liquid`, `cot_ice`, `cot_total` | Optical depth (ice = integrated ice extinction) |
 | `cer_liquid_col`, `cer_ice_col` | Effective radius (µm), extinction-weighted over the column |
-| `cer_liquid_top`, `cer_ice_top` | Same, but only the top 1 unit of optical depth |
 | `lwp`, `iwp`, `rwp` | Liquid, ice and rain water path (g m⁻²) |
-| `ice_frac_top` | Ice share of the top 1 unit of optical depth (0 = liquid top, 1 = ice top) |
-| `phase_col` | 0 clear, 1 liquid only, 2 ice only, 3 both |
-| `cth`, `ctt` | Geometric cloud top (km) and temperature there (K) |
-| `z_tau1`, `t_tau1` | Height and temperature where optical depth from the top reaches 1 |
+| `phase_col` | 0 clear, 1 liquid only, 2 ice only, 3 both (a phase counts if its optical depth ≥ 0.01) |
 | `quality_status`, `convergence_status`, `synergy_status`, `*_assim_status` | ACM-CAP flags as in the product (0 = good) |
 | `cot_liquid_lnerr`, `iwp_lnerr`, `aod`, `cost_function`, `elevation_m`, `tropopause_m` | Straight from the product |
 
+**A-CTH — `acth_*`**
+
+Cloud-top height comes from the A-CTH product (ACM-CAP has none):
+
+| Column | Meaning |
+|---|---|
+| `acth_cth_thick_km` | `ATLID_thick_cloud_top_height` — top of the uppermost optically thick layer (km) |
+| `acth_cth_km` | `ATLID_cloud_top_height` — lidar-detected top, including thin cirrus (km) |
+| `acth_tropopause_km` | `tropopause_height_wmo` (km) |
+| `acth_quality_status` | −1 no cloud, 0 good, 1 low confidence, 2–3 warnings, 4 bad |
+| `acth_confidence`, `acth_cloud_class` | As in the product (class: 1 thick, 2 thin, 3 thin over thick, 4 thick over thick, 5 thin over thin) |
+
 ## Worth knowing
 
-- ORAC `cth` follows an optical-depth level, not the geometric top. On the same
-  22,755 pixels (ACM-CAP COT ≥ 1, ±60 min) the median difference is −1.6 km
-  against `cth` and +0.2 km against `z_tau1`. The gap to the geometric top is
-  almost all multi-layer scenes: −0.2 km with one cloud layer, −3.6 km with two.
-  The closest level is a little above `z_tau1`, at about 0.3–0.5 optical depth.
-  One day of data, so treat the exact level as provisional.
-- For effective radius I wasn't sure whether column or cloud-top weighting is
-  the better match to ORAC, so both are there.
+- `acth_cth_thick_km` has spurious values far above the tropopause (up to
+  39 km, 40% of its values in this file). Screen with
+  `acth_cth_thick_km <= acth_tropopause_km + 2`.
 - No parallax correction.
 
 Made with `python -m validation slstr-pixel-collocate` (code in

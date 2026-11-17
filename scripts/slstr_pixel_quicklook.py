@@ -64,11 +64,13 @@ def main(csv: str, out: str, max_dt_min: float = 10.0) -> int:
     ax.set(xlabel="nearest profile → pixel centre (km)", ylabel="pixels",
            title="Match distance")
 
-    m = near & good & d["orac_cth"].notna() & d["acmcap_cth"].notna()
-    for j, (col, lab) in enumerate((("acmcap_cth", "ACM-CAP geometric top"),
-                                    ("acmcap_z_tau1", "ACM-CAP τ = 1 level"))):
+    # A-CTH heights have a spurious stratospheric tail; cap as in the CTH reports.
+    cap = d["acth_tropopause_km"] + 2
+    m = near & (d["acth_quality_status"] == 0) & d["orac_cth"].notna()
+    for j, (col, lab) in enumerate((("acth_cth_thick_km", "A-CTH thick-cloud top"),
+                                    ("acth_cth_km", "A-CTH lidar top"))):
         ax = fig.add_subplot(2, 4, 5 + j)
-        mm = m & d[col].notna()
+        mm = m & (d[col] <= cap)
         ax.scatter(d.loc[mm, col], d.loc[mm, "orac_cth"], s=3, color=BLUE,
                    alpha=0.25, linewidths=0)
         ax.plot([0, 13], [0, 13], color=GREY, lw=1)
@@ -80,27 +82,27 @@ def main(csv: str, out: str, max_dt_min: float = 10.0) -> int:
     _loglog(fig.add_subplot(2, 4, 7), d.loc[m, "acmcap_cot_total"], d.loc[m, "orac_cot"],
             (0.05, 300), "ACM-CAP total COT", "ORAC cot", "COT, daytime")
 
-    # Phase: ORAC phase (0 clear, 1 liquid, 2 ice) vs ACM-CAP top phase.
+    # Phase: ORAC phase (0 clear, 1 liquid, 2 ice) vs ACM-CAP column phase.
     ax = fig.add_subplot(2, 4, 8)
-    m = near & good & d["orac_phase"].notna()
-    ref = np.where(d["acmcap_cot_total"] < 0.1, 0,
-                   np.where(d["acmcap_ice_frac_top"] >= 0.5, 2, 1))
-    table = pd.crosstab(ref[m], d.loc[m, "orac_phase"].astype(int)).reindex(
-        index=[0, 1, 2], columns=[0, 1, 2], fill_value=0)
+    m = near & good & d["orac_phase"].notna() & d["acmcap_phase_col"].notna()
+    table = pd.crosstab(d.loc[m, "acmcap_phase_col"].astype(int),
+                        d.loc[m, "orac_phase"].astype(int)).reindex(
+        index=[0, 1, 2, 3], columns=[0, 1, 2], fill_value=0)
     frac = table.div(table.sum(axis=1).replace(0, np.nan), axis=0)
-    ax.imshow(frac, cmap="Blues", vmin=0, vmax=1)
-    for r in range(3):
+    ax.imshow(frac, cmap="Blues", vmin=0, vmax=1, aspect="auto")
+    for r in range(4):
         for c in range(3):
             ax.text(c, r, f"{table.iat[r, c]:,}\n{frac.iat[r, c]:.0%}", ha="center",
                     va="center", fontsize=9,
                     color="white" if frac.iat[r, c] > 0.55 else "black")
-    names = ["clear", "liquid", "ice"]
-    ax.set(xticks=range(3), yticks=range(3), xticklabels=names, yticklabels=names,
-           xlabel="ORAC phase", ylabel="ACM-CAP (top τ = 1; clear if COT < 0.1)",
+    ax.set(xticks=range(3), yticks=range(4), xticklabels=["clear", "liquid", "ice"],
+           yticklabels=["clear", "liquid only", "ice only", "both"],
+           xlabel="ORAC phase", ylabel="ACM-CAP column phase",
            title=f"Phase, row-normalised  (n = {int(table.values.sum()):,})")
 
     fig.suptitle(f"SLSTR-pixel × ACM-CAP collocation quick-look — {csv.split('/')[-1]}\n"
-                 f"Lower row: |Δt| ≤ {max_dt_min:g} min and ACM-CAP quality_status = 0",
+                 f"Lower row: |Δt| ≤ {max_dt_min:g} min, reference quality_status = 0; "
+                 f"A-CTH ≤ tropopause + 2 km",
                  fontsize=12)
     fig.tight_layout()
     fig.savefig(out, dpi=140)
